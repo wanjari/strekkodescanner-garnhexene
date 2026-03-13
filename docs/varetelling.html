@@ -679,7 +679,7 @@ async function cacheAllVariants() {
 
     updateScannerStatus('Laster produkter...');
     while (hasMore) {
-        const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean`);
+        const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean,quantity`);
         const products = data.data || [];
         for (const p of products) {
             const name = p.attributes.name?.no || p.attributes.name?.en || '';
@@ -692,7 +692,7 @@ async function cacheAllVariants() {
                     name: name,
                     ean: p.attributes.ean,
                     sku: p.attributes.sku || '',
-                    quantity: 0
+                    quantity: parseInt(p.attributes.quantity) || 0
                 };
             }
             if (p.attributes.sku) {
@@ -702,7 +702,7 @@ async function cacheAllVariants() {
                     name: name,
                     ean: p.attributes.ean || '',
                     sku: p.attributes.sku,
-                    quantity: 0
+                    quantity: parseInt(p.attributes.quantity) || 0
                 };
             }
         }
@@ -767,6 +767,21 @@ async function updateVariantStock(variantId, quantity) {
     });
 }
 
+async function updateProductStock(productId, quantity) {
+    return apiFetch(`/products/${productId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        body: JSON.stringify({
+            data: {
+                type: 'products',
+                id: String(productId),
+                attributes: {
+                    quantity: quantity
+                }
+            }
+        })
+    });
+}
 // ─── SCANNER ─────────────────────────────────────────
 function startScanner() {
     html5QrCode = new Html5Qrcode("reader");
@@ -973,6 +988,7 @@ function updateBadge() {
     document.getElementById('countBadge').textContent = countedItems.length + ' telt';
 }
 
+
 // ─── SAVE TO MYSTORE ─────────────────────────────────
 async function saveAllToMyStore() {
     const pending = countedItems.filter(i => i.status !== 'saved');
@@ -983,14 +999,13 @@ async function saveAllToMyStore() {
 
     for (const item of pending) {
         try {
-            if (!item.variantId) {
-                item.status = 'error';
-                console.error('Mangler variantId', item);
-                continue;
+           if (item.variantId) {
+                await updateVariantStock(item.variantId, item.newQty);
+                } else if (item.productId) {
+                    await updateProductStock(item.productId, item.newQty);
+                } else {
+                    throw new Error('Mangler både variantId og productId');
             }
-
-            await updateVariantStock(item.variantId, item.newQty);
-            item.status = 'saved';
         } catch (e) {
             item.status = 'error';
             console.error('Lagring feilet for vare:', item, e);
