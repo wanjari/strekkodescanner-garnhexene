@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Varetelling – MyStore</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface-2: #242836;
+            --border: #2e3347;
+            --text: #e8eaed;
+            --text-muted: #8b8fa3;
+            --accent: #6c5ce7;
+            --accent-light: #a29bfe;
+            --success: #00b894;
+            --success-bg: rgba(0, 184, 148, 0.12);
+            --warning: #fdcb6e;
+            --warning-bg: rgba(253, 203, 110, 0.12);
+            --danger: #e17055;
+            --danger-bg: rgba(225, 112, 85, 0.12);
+            --radius: 12px;
+            --radius-sm: 8px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100dvh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Header */
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+        .header h1 span {
+            color: var(--accent-light);
+            font-family: 'DM Mono', monospace;
+            font-weight: 500;
+            font-size: 14px;
+            margin-left: 8px;
+        }
+        .badge {
+            background: var(--accent);
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-family: 'DM Mono', monospace;
+        }
+
+        /* Setup screen */
+        .screen { display: none; }
+        .screen.active { display: block; }
+
+        .setup-container {
+            max-width: 440px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .setup-container h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+        .setup-container p {
+            color: var(--text-muted);
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 32px;
+        }
+
+        .field {
+            margin-bottom: 20px;
+        }
+        .field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .field input, .field select {
+            width: 100%;
+            padding: 14px 16px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-family: 'DM Mono', monospace;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .field input:focus, .field select:focus {
+            border-color: var(--accent);
+        }
+        .field input::placeholder {
+            color: var(--text-muted);
+            opacity: 0.5;
+        }
+        .field .hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: var(--radius);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        .btn-primary:hover { background: #5b4bd6; }
+        .btn-primary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: var(--surface-2);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { background: var(--border); }
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+        .btn-success:hover { background: #00a382; }
+        .btn-danger {
+            background: transparent;
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+        .btn-sm {
+            padding: 10px 16px;
+            font-size: 13px;
+            width: auto;
+        }
+
+        /* Scanner screen */
+        .scanner-layout {
+            display: flex;
+            flex-direction: column;
+            height: calc(100dvh - 57px);
+        }
+        .scanner-area {
+            position: relative;
+            background: #000;
+            flex: 0 0 auto;
+            height: 280px;
+            overflow: hidden;
+        }
+        .scanner-area #reader {
+            width: 100%;
+            height: 100%;
+        }
+        .scanner-area #reader video {
+            object-fit: cover !important;
+        }
+        /* Hide the html5-qrcode default UI chrome */
+        #reader__dashboard { display: none !important; }
+        #reader__scan_region { height: 100% !important; }
+        #reader__scan_region img { display: none !important; }
+
+        .scanner-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .scan-frame {
+            width: 220px;
+            height: 120px;
+            border: 2px solid rgba(168, 155, 254, 0.6);
+            border-radius: 12px;
+            position: relative;
+        }
+        .scan-frame::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 8px;
+            right: 8px;
+            height: 2px;
+            background: var(--accent-light);
+            animation: scanline 2s ease-in-out infinite;
+        }
+        @keyframes scanline {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+
+        .scanner-status {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            color: white;
+            font-size: 13px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            z-index: 10;
+            white-space: nowrap;
+        }
+
+        /* Content below scanner */
+        .content-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            padding-bottom: 100px;
+        }
+
+        /* Manual entry */
+        .manual-entry {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .manual-entry input {
+            flex: 1;
+            padding: 12px 14px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-family: 'DM Mono', monospace;
+            font-size: 14px;
+            outline: none;
+        }
+        .manual-entry input:focus { border-color: var(--accent); }
+
+        /* Product card */
+        .product-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 16px;
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .product-card .product-name {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .product-card .product-meta {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-family: 'DM Mono', monospace;
+            margin-bottom: 16px;
+        }
+        .product-card .stock-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .stock-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            min-width: 90px;
+        }
+        .stock-value {
+            font-family: 'DM Mono', monospace;
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .qty-input-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+        .qty-input-row label {
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .qty-stepper {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        .qty-stepper button {
+            width: 44px;
+            height: 44px;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s;
+        }
+        .qty-stepper button:hover { background: var(--border); }
+        .qty-stepper input {
+            width: 64px;
+            height: 44px;
+            border: none;
+            border-left: 1px solid var(--border);
+            border-right: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            font-family: 'DM Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            outline: none;
+            -moz-appearance: textfield;
+        }
+        .qty-stepper input::-webkit-inner-spin-button,
+        .qty-stepper input::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+        }
+        .qty-input-row .btn {
+            width: auto;
+            flex-shrink: 0;
+        }
+
+        /* Counted list */
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            margin-top: 24px;
+        }
+        .counted-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            margin-bottom: 8px;
+        }
+        .counted-item .item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .counted-item .item-name {
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .counted-item .item-ean {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'DM Mono', monospace;
+        }
+        .counted-item .item-qty {
+            font-family: 'DM Mono', monospace;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--success);
+            margin-left: 12px;
+            flex-shrink: 0;
+        }
+        .counted-item .item-status {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+        .status-saved {
+            background: var(--success-bg);
+            color: var(--success);
+        }
+        .status-pending {
+            background: var(--warning-bg);
+            color: var(--warning);
+        }
+        .status-error {
+            background: var(--danger-bg);
+            color: var(--danger);
+        }
+
+        /* Bottom bar */
+        .bottom-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            padding: 12px 20px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            display: flex;
+            gap: 8px;
+            z-index: 100;
+        }
+        .bottom-bar .btn { flex: 1; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            top: 72px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px 20px;
+            border-radius: var(--radius);
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 999;
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        .toast.success { border-color: var(--success); }
+        .toast.error { border-color: var(--danger); }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+        .empty-state .icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.4;
+        }
+        .empty-state p { font-size: 14px; }
+
+        /* Loading spinner */
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Responsive tweaks */
+        @media (min-width: 600px) {
+            .scanner-area { height: 340px; }
+            .content-area { max-width: 560px; margin: 0 auto; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<!-- SETUP SCREEN -->
+<div class="screen active" id="setupScreen">
+    <div class="header">
+        <h1>Varetelling <span>MyStore</span></h1>
+    </div>
+    <div class="setup-container">
+        <h2>Kom i gang</h2>
+        <p>Koble til MyStore-butikken din for å starte varetelling. Du trenger API-nøkkelen fra kontrollpanelet og butikkens domene.</p>
+
+        <div class="field">
+            <label>Butikkdomene</label>
+            <input type="text" id="storeDomain" placeholder="minbutikk.mystore.no">
+            <div class="hint">Domenet til MyStore-butikken din (uten https://)</div>
+        </div>
+
+        <div class="field">
+            <label>API-nøkkel</label>
+            <input type="password" id="apiKey" placeholder="Din MyStore API-nøkkel">
+            <div class="hint">Finnes i MyStore kontrollpanel → Innstillinger → API</div>
+        </div>
+
+        <button class="btn btn-primary" id="connectBtn" onclick="connect()">
+            Koble til og start
+        </button>
+    </div>
+</div>
+
+<!-- SCANNER SCREEN -->
+<div class="screen" id="scannerScreen">
+    <div class="header">
+        <h1>Varetelling <span>MyStore</span></h1>
+        <span class="badge" id="countBadge">0 telt</span>
+    </div>
+    <div class="scanner-layout">
+        <div class="scanner-area">
+            <div id="reader"></div>
+            <div class="scanner-overlay">
+                <div class="scan-frame"></div>
+            </div>
+            <div class="scanner-status" id="scannerStatus">Klar til skanning...</div>
+        </div>
+
+        <div class="content-area">
+            <!-- Manual EAN entry -->
+            <div class="manual-entry">
+                <input type="text" id="manualEan" placeholder="Tast inn EAN / strekkode..." inputmode="numeric">
+                <button class="btn btn-primary btn-sm" onclick="manualLookup()">Søk</button>
+            </div>
+
+            <!-- Current product -->
+            <div id="currentProduct"></div>
+
+            <!-- Counted items -->
+            <div id="countedSection"></div>
+        </div>
+
+        <div class="bottom-bar">
+            <button class="btn btn-success" onclick="saveAllToMyStore()">
+                Lagre alle til MyStore
+            </button>
+            <button class="btn btn-secondary" onclick="exportCSV()" style="flex: 0 0 auto; width: auto; padding: 16px;">
+                📥
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────
+let config = { domain: '', apiKey: '' };
+let productCache = {};      // EAN → product data
+let countedItems = [];       // { productId, name, ean, model, oldQty, newQty, status }
+let html5QrCode = null;
+let isScanning = false;
+let lastScannedCode = '';
+let lastScanTime = 0;
+
+// ─── SETUP ───────────────────────────────────────────
+function connect() {
+    const domain = document.getElementById('storeDomain').value.trim();
+    const apiKey = document.getElementById('apiKey').value.trim();
+    if (!domain || !apiKey) {
+        showToast('Fyll inn begge feltene', 'error');
+        return;
+    }
+    config.domain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    config.apiKey = apiKey;
+
+    // Save to sessionStorage for convenience during session
+    sessionStorage.setItem('ms_domain', config.domain);
+    sessionStorage.setItem('ms_apikey', config.apiKey);
+
+    // Test connection by fetching first page of products
+    const btn = document.getElementById('connectBtn');
+    btn.innerHTML = '<span class="spinner"></span> Kobler til...';
+    btn.disabled = true;
+
+    fetchProducts(1)
+        .then(data => {
+            if (data.code === 200) {
+                showToast('Tilkoblet! Laster produkter...', 'success');
+                // Cache all products (paginated)
+                cacheAllProducts().then(() => {
+                    document.getElementById('setupScreen').classList.remove('active');
+                    document.getElementById('scannerScreen').classList.add('active');
+                    startScanner();
+                });
+            } else {
+                throw new Error('Feil respons fra API');
+            }
+        })
+        .catch(err => {
+            showToast('Kunne ikke koble til: ' + err.message, 'error');
+            btn.innerHTML = 'Koble til og start';
+            btn.disabled = false;
+        });
+}
+
+// ─── API HELPERS ─────────────────────────────────────
+function apiBase() {
+    return `https://${config.domain}/api`;
+}
+
+function fetchProducts(page = 1, pageSize = 250) {
+    const url = `${apiBase()}/products.json?api_key=${encodeURIComponent(config.apiKey)}&page=${page}&page_size=${pageSize}`;
+    return fetch(url).then(r => r.json());
+}
+
+async function cacheAllProducts() {
+    let page = 1;
+    let total = Infinity;
+    let loaded = 0;
+
+    while (loaded < total) {
+        const data = await fetchProducts(page, 250);
+        if (data.code !== 200) break;
+
+        total = parseInt(data.data.product_count_total) || 0;
+        const products = data.data.product_data || {};
+
+        for (const [id, product] of Object.entries(products)) {
+            // Index by EAN if available
+            if (product.products_ean) {
+                productCache[product.products_ean] = product;
+            }
+            // Also index by model for fallback
+            if (product.products_model) {
+                productCache['model:' + product.products_model] = product;
+            }
+            // Also index by product ID
+            productCache['id:' + product.products_id] = product;
+            loaded++;
+        }
+
+        // If we got fewer than page_size, we're done
+        if (Object.keys(products).length < 250) break;
+        page++;
+    }
+
+    showToast(`${loaded} produkter lastet inn`, 'success');
+}
+
+async function updateProductStock(productId, quantity) {
+    const url = `${apiBase()}/products/create_or_update.json?api_key=${encodeURIComponent(config.apiKey)}`;
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'product_data=' + encodeURIComponent(JSON.stringify({
+            products_id: String(productId),
+            products_quantity: String(quantity)
+        }))
+    });
+    return response.json();
+}
+
+// ─── SCANNER ─────────────────────────────────────────
+function startScanner() {
+    html5QrCode = new Html5Qrcode("reader");
+
+    const scanConfig = {
+        fps: 10,
+        qrbox: { width: 220, height: 120 },
+        aspectRatio: 1.5,
+        formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+        ]
+    };
+
+    html5QrCode.start(
+        { facingMode: "environment" },
+        scanConfig,
+        onScanSuccess,
+        () => {} // ignore scan failures (no barcode in frame)
+    ).then(() => {
+        isScanning = true;
+        updateScannerStatus('Skann en strekkode...');
+    }).catch(err => {
+        console.error('Kamera-feil:', err);
+        updateScannerStatus('Kamera ikke tilgjengelig – bruk manuelt felt');
+    });
+}
+
+function onScanSuccess(decodedText) {
+    // Debounce: ignore same code within 3 seconds
+    const now = Date.now();
+    if (decodedText === lastScannedCode && (now - lastScanTime) < 3000) return;
+    lastScannedCode = decodedText;
+    lastScanTime = now;
+
+    // Vibrate feedback if available
+    if (navigator.vibrate) navigator.vibrate(100);
+
+    lookupProduct(decodedText);
+}
+
+function manualLookup() {
+    const ean = document.getElementById('manualEan').value.trim();
+    if (!ean) return;
+    document.getElementById('manualEan').value = '';
+    lookupProduct(ean);
+}
+
+// Enter key in manual field
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('manualEan')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') manualLookup();
+    });
+
+    // Restore session
+    const d = sessionStorage.getItem('ms_domain');
+    const k = sessionStorage.getItem('ms_apikey');
+    if (d) document.getElementById('storeDomain').value = d;
+    if (k) document.getElementById('apiKey').value = k;
+});
+
+function lookupProduct(code) {
+    updateScannerStatus('Søker: ' + code);
+
+    const product = productCache[code];
+    if (product) {
+        showProductCard(product, code);
+    } else {
+        // Try search API as fallback
+        const url = `${apiBase()}/products/search/${encodeURIComponent(code)}.json?api_key=${encodeURIComponent(config.apiKey)}`;
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                if (data.code === 200 && data.data?.data) {
+                    // Find first result
+                    const categories = data.data.data;
+                    for (const cat of Object.values(categories)) {
+                        if (cat.result_entries && cat.result_entries.length > 0) {
+                            const entry = cat.result_entries[0];
+                            // Fetch full product
+                            return fetchSingleProduct(entry.products_id);
+                        }
+                    }
+                }
+                showToast('Produkt ikke funnet: ' + code, 'error');
+                updateScannerStatus('Ikke funnet – prøv igjen');
+            })
+            .catch(() => {
+                showToast('Feil ved oppslag', 'error');
+                updateScannerStatus('Feil – prøv igjen');
+            });
+    }
+}
+
+async function fetchSingleProduct(productId) {
+    const url = `${apiBase()}/products/product/${productId}.json?api_key=${encodeURIComponent(config.apiKey)}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.code === 200 && data.data?.product_data) {
+        const product = Object.values(data.data.product_data)[0];
+        if (product.products_ean) productCache[product.products_ean] = product;
+        showProductCard(product, product.products_ean || '');
+    }
+}
+
+function showProductCard(product, scannedCode) {
+    updateScannerStatus('Funnet! ✓');
+    const existing = countedItems.find(i => i.productId === product.products_id);
+    const currentQty = existing ? existing.newQty : parseInt(product.products_quantity) || 0;
+
+    const html = `
+        <div class="product-card">
+            <div class="product-name">${escHtml(product.products_name)}</div>
+            <div class="product-meta">
+                ${product.products_ean ? 'EAN: ' + escHtml(product.products_ean) + ' · ' : ''}
+                ${product.products_model ? 'Modell: ' + escHtml(product.products_model) + ' · ' : ''}
+                ID: ${product.products_id}
+            </div>
+            <div class="stock-row">
+                <span class="stock-label">Nåværende lager:</span>
+                <span class="stock-value">${product.products_quantity || '0'}</span>
+            </div>
+            <div class="qty-input-row">
+                <label>Telt antall:</label>
+                <div class="qty-stepper">
+                    <button onclick="stepQty(-1)">−</button>
+                    <input type="number" id="qtyInput" value="${existing ? currentQty : ''}" min="0" placeholder="0" inputmode="numeric">
+                    <button onclick="stepQty(1)">+</button>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.products_id}', '${escAttr(product.products_name)}', '${escAttr(scannedCode)}', '${escAttr(product.products_model || '')}', ${parseInt(product.products_quantity) || 0})">
+                    ${existing ? 'Oppdater' : 'Registrer'}
+                </button>
+            </div>
+        </div>
+    `;
+    document.getElementById('currentProduct').innerHTML = html;
+
+    // Focus qty input
+    setTimeout(() => {
+        const inp = document.getElementById('qtyInput');
+        if (inp) inp.focus();
+    }, 100);
+}
+
+function stepQty(delta) {
+    const inp = document.getElementById('qtyInput');
+    if (!inp) return;
+    let val = parseInt(inp.value) || 0;
+    val = Math.max(0, val + delta);
+    inp.value = val;
+}
+
+function registerCount(productId, name, ean, model, oldQty) {
+    const inp = document.getElementById('qtyInput');
+    const newQty = parseInt(inp?.value);
+    if (isNaN(newQty) || newQty < 0) {
+        showToast('Ugyldig antall', 'error');
+        return;
+    }
+
+    // Update or add
+    const existing = countedItems.find(i => i.productId === productId);
+    if (existing) {
+        existing.newQty = newQty;
+        existing.status = 'pending';
+    } else {
+        countedItems.push({ productId, name, ean, model, oldQty, newQty, status: 'pending' });
+    }
+
+    document.getElementById('currentProduct').innerHTML = '';
+    updateCountedList();
+    updateBadge();
+    showToast(`${name}: ${newQty} stk registrert`, 'success');
+    updateScannerStatus('Skann neste vare...');
+}
+
+// ─── COUNTED LIST ────────────────────────────────────
+function updateCountedList() {
+    if (countedItems.length === 0) {
+        document.getElementById('countedSection').innerHTML = '';
+        return;
+    }
+
+    let html = '<div class="section-title">Telte varer (' + countedItems.length + ')</div>';
+    // Show newest first
+    for (let i = countedItems.length - 1; i >= 0; i--) {
+        const item = countedItems[i];
+        const diff = item.newQty - item.oldQty;
+        const diffStr = diff > 0 ? `+${diff}` : String(diff);
+        const statusClass = item.status === 'saved' ? 'status-saved' : item.status === 'error' ? 'status-error' : 'status-pending';
+        const statusText = item.status === 'saved' ? 'Lagret' : item.status === 'error' ? 'Feil' : 'Venter';
+
+        html += `
+            <div class="counted-item">
+                <div class="item-info">
+                    <div class="item-name">${escHtml(item.name)}</div>
+                    <div class="item-ean">${item.ean || item.model || 'ID: ' + item.productId} · Før: ${item.oldQty} → ${item.newQty} (${diffStr})</div>
+                </div>
+                <span class="item-qty">${item.newQty}</span>
+                <span class="item-status ${statusClass}">${statusText}</span>
+            </div>
+        `;
+    }
+    document.getElementById('countedSection').innerHTML = html;
+}
+
+function updateBadge() {
+    document.getElementById('countBadge').textContent = countedItems.length + ' telt';
+}
+
+// ─── SAVE TO MYSTORE ─────────────────────────────────
+async function saveAllToMyStore() {
+    const pending = countedItems.filter(i => i.status !== 'saved');
+    if (pending.length === 0) {
+        showToast('Ingen ventende varer å lagre', 'error');
+        return;
+    }
+
+    showToast(`Lagrer ${pending.length} varer...`, 'success');
+
+    for (const item of pending) {
+        try {
+            const result = await updateProductStock(item.productId, item.newQty);
+            if (result.code === 200 || (result.data?.message?.success === 'true')) {
+                item.status = 'saved';
+            } else {
+                item.status = 'error';
+            }
+        } catch (e) {
+            item.status = 'error';
+        }
+    }
+
+    updateCountedList();
+    const saved = countedItems.filter(i => i.status === 'saved').length;
+    const errors = countedItems.filter(i => i.status === 'error').length;
+    if (errors > 0) {
+        showToast(`${saved} lagret, ${errors} feilet`, 'error');
+    } else {
+        showToast(`Alle ${saved} varer lagret i MyStore!`, 'success');
+    }
+}
+
+// ─── EXPORT CSV ──────────────────────────────────────
+function exportCSV() {
+    if (countedItems.length === 0) {
+        showToast('Ingen varer å eksportere', 'error');
+        return;
+    }
+    const header = 'ProduktID;Navn;EAN;Modell;Gammelt antall;Nytt antall;Differanse;Status\n';
+    const rows = countedItems.map(i => {
+        const diff = i.newQty - i.oldQty;
+        return `${i.productId};"${i.name}";${i.ean};${i.model};${i.oldQty};${i.newQty};${diff};${i.status}`;
+    }).join('\n');
+
+    const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `varetelling_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV eksportert', 'success');
+}
+
+// ─── HELPERS ─────────────────────────────────────────
+function escHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+}
+function escAttr(str) {
+    return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function updateScannerStatus(text) {
+    const el = document.getElementById('scannerStatus');
+    if (el) el.textContent = text;
+}
+
+function showToast(msg, type = '') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast show' + (type ? ' ' + type : '');
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => el.className = 'toast', 2500);
+}
+</script>
+
+</body>
+</html>
