@@ -647,9 +647,27 @@ function apiFetch(path, options = {}) {
         'Accept': 'application/vnd.api+json',
         ...(options.headers || {})
     };
-    return fetch(url, { ...options, headers }).then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+
+    return fetch(url, { ...options, headers }).then(async r => {
+        const text = await r.text();
+
+        let data = null;
+        try {
+            data = text ? JSON.parse(text) : null;
+        } catch {
+            data = text;
+        }
+
+        if (!r.ok) {
+            console.error('API error', {
+                url,
+                status: r.status,
+                response: data
+            });
+            throw new Error(`HTTP ${r.status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+        }
+
+        return data;
     });
 }
 
@@ -963,29 +981,24 @@ async function saveAllToMyStore() {
         return;
     }
 
-    showToast(`Lagrer ${pending.length} varer...`, 'success');
-
     for (const item of pending) {
         try {
             if (!item.variantId) {
                 item.status = 'error';
+                console.error('Mangler variantId', item);
                 continue;
             }
+
             await updateVariantStock(item.variantId, item.newQty);
             item.status = 'saved';
         } catch (e) {
             item.status = 'error';
+            console.error('Lagring feilet for vare:', item, e);
+            showToast(`Feil ved lagring: ${e.message}`, 'error');
         }
     }
 
     updateCountedList();
-    const saved = countedItems.filter(i => i.status === 'saved').length;
-    const errors = countedItems.filter(i => i.status === 'error').length;
-    if (errors > 0) {
-        showToast(`${saved} lagret, ${errors} feilet`, 'error');
-    } else {
-        showToast(`Alle ${saved} varer lagret i MyStore!`, 'success');
-    }
 }
 
 // ─── EXPORT CSV ──────────────────────────────────────
