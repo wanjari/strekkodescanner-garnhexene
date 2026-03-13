@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="no">
 <head>
-    <meta charset="utf-8"> 
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Varetelling – Garnhexene</title>
+    <title>Varetelling – MyStore</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -528,9 +528,9 @@
         <p>Koble til MyStore-butikken din for å starte varetelling. Du trenger API-nøkkelen fra kontrollpanelet og butikkens domene.</p>
 
         <div class="field">
-            <label>Butikkdomene</label>
-            <input type="text" id="storeDomain" placeholder="minbutikk.mystore.no">
-            <div class="hint">Domenet til MyStore-butikken din (uten https://)</div>
+            <label>Butikknavn</label>
+            <input type="text" id="shopName" placeholder="minbutikk">
+            <div class="hint">Butikknavnet fra MyStore (f.eks. «garnhexene8015» fra garnhexene8015.mystore4.no)</div>
         </div>
 
         <div class="field">
@@ -587,9 +587,9 @@
 
 <script>
 // ─── STATE ───────────────────────────────────────────
-let config = { domain: '', apiKey: '' };
-let productCache = {};      // EAN → product data
-let countedItems = [];       // { productId, name, ean, model, oldQty, newQty, status }
+let config = { shopName: '', apiKey: '' };
+let productCache = {};      // EAN → { id, variantId, name, ean, sku, quantity, productId }
+let countedItems = [];       // { variantId, productId, name, ean, sku, oldQty, newQty, status }
 let html5QrCode = null;
 let isScanning = false;
 let lastScannedCode = '';
@@ -597,30 +597,29 @@ let lastScanTime = 0;
 
 // ─── SETUP ───────────────────────────────────────────
 function connect() {
-    const domain = document.getElementById('storeDomain').value.trim();
+    const shopName = document.getElementById('shopName').value.trim();
     const apiKey = document.getElementById('apiKey').value.trim();
-    if (!domain || !apiKey) {
+    if (!shopName || !apiKey) {
         showToast('Fyll inn begge feltene', 'error');
         return;
     }
-    config.domain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    // Extract shop name from full URL if pasted
+    config.shopName = shopName.replace(/^https?:\/\//, '').replace(/\.mystore.*$/, '').replace(/\/$/, '');
     config.apiKey = apiKey;
 
-    // Save to sessionStorage for convenience during session
-    sessionStorage.setItem('ms_domain', config.domain);
+    sessionStorage.setItem('ms_shopname', config.shopName);
     sessionStorage.setItem('ms_apikey', config.apiKey);
 
-    // Test connection by fetching first page of products
     const btn = document.getElementById('connectBtn');
     btn.innerHTML = '<span class="spinner"></span> Kobler til...';
     btn.disabled = true;
 
-    fetchProducts(1)
+    // Test connection by fetching first page of products
+    apiFetch('/products?page[size]=1&page[number]=1')
         .then(data => {
-            if (data.code === 200) {
-                showToast('Tilkoblet! Laster produkter...', 'success');
-                // Cache all products (paginated)
-                cacheAllProducts().then(() => {
+            if (data.data) {
+                showToast('Tilkoblet! Laster produkter og varianter...', 'success');
+                cacheAllVariants().then(() => {
                     document.getElementById('setupScreen').classList.remove('active');
                     document.getElementById('scannerScreen').classList.add('active');
                     startScanner();
@@ -638,59 +637,116 @@ function connect() {
 
 // ─── API HELPERS ─────────────────────────────────────
 function apiBase() {
-    return `https://${config.domain}/api`;
+    return `https://api.mystore.no/shops/${config.shopName}`;
 }
 
-function fetchProducts(page = 1, pageSize = 250) {
-    const url = `${apiBase()}/products.json?api_key=${encodeURIComponent(config.apiKey)}&page=${page}&page_size=${pageSize}`;
-    return fetch(url).then(r => r.json());
+function apiFetch(path, options = {}) {
+    const url = apiBase() + path;
+    const headers = {
+        'Authorization': `Bearer ${config.apiKey}`,
+        'Accept': 'application/vnd.api+json',
+        ...(options.headers || {})
+    };
+    return fetch(url, { ...options, headers }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+    });
 }
 
-async function cacheAllProducts() {
+async function cacheAllVariants() {
+    // Step 1: Load all products (for names)
     let page = 1;
-    let total = Infinity;
-    let loaded = 0;
+    let hasMore = true;
+    const productNames = {}; // productId → name
 
-    while (loaded < total) {
-        const data = await fetchProducts(page, 250);
-        if (data.code !== 200) break;
-
-        total = parseInt(data.data.product_count_total) || 0;
-        const products = data.data.product_data || {};
-
-        for (const [id, product] of Object.entries(products)) {
-            // Index by EAN if available
-            if (product.products_ean) {
-                productCache[product.products_ean] = product;
+    updateScannerStatus('Laster produkter...');
+    while (hasMore) {
+        const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean`);
+        const products = data.data || [];
+        for (const p of products) {
+            const name = p.attributes.name?.no || p.attributes.name?.en || '';
+            productNames[p.id] = name;
+            // Index product-level EAN if present
+            if (p.attributes.ean) {
+                productCache[p.attributes.ean] = {
+                    productId: p.id,
+                    variantId: null,
+                    name: name,
+                    ean: p.attributes.ean,
+                    sku: p.attributes.sku || '',
+                    quantity: 0
+                };
             }
-            // Also index by model for fallback
-            if (product.products_model) {
-                productCache['model:' + product.products_model] = product;
+            if (p.attributes.sku) {
+                productCache['sku:' + p.attributes.sku] = {
+                    productId: p.id,
+                    variantId: null,
+                    name: name,
+                    ean: p.attributes.ean || '',
+                    sku: p.attributes.sku,
+                    quantity: 0
+                };
             }
-            // Also index by product ID
-            productCache['id:' + product.products_id] = product;
-            loaded++;
         }
-
-        // If we got fewer than page_size, we're done
-        if (Object.keys(products).length < 250) break;
+        hasMore = products.length === 250;
         page++;
     }
 
-    showToast(`${loaded} produkter lastet inn`, 'success');
+    // Step 2: Load all product-variants (for EAN + stock)
+    page = 1;
+    hasMore = true;
+    let variantCount = 0;
+
+    updateScannerStatus('Laster varianter...');
+    while (hasMore) {
+        const data = await apiFetch(`/product-variants?page[size]=250&page[number]=${page}`);
+        const variants = data.data || [];
+        for (const v of variants) {
+            const attr = v.attributes;
+            const productId = v.relationships?.product?.data?.id;
+            const name = productNames[productId] || 'Ukjent produkt';
+            const entry = {
+                productId: productId,
+                variantId: v.id,
+                name: name,
+                ean: attr.ean || '',
+                sku: attr.sku || '',
+                quantity: parseInt(attr.quantity) || 0
+            };
+
+            // Index by EAN
+            if (attr.ean) {
+                productCache[attr.ean] = entry;
+            }
+            // Index by SKU
+            if (attr.sku) {
+                productCache['sku:' + attr.sku] = entry;
+            }
+            // Index by variant ID
+            productCache['vid:' + v.id] = entry;
+            variantCount++;
+        }
+        hasMore = variants.length === 250;
+        page++;
+    }
+
+    showToast(`${Object.keys(productNames).length} produkter, ${variantCount} varianter lastet`, 'success');
 }
 
-async function updateProductStock(productId, quantity) {
-    const url = `${apiBase()}/products/create_or_update.json?api_key=${encodeURIComponent(config.apiKey)}`;
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'product_data=' + encodeURIComponent(JSON.stringify({
-            products_id: String(productId),
-            products_quantity: String(quantity)
-        }))
+async function updateVariantStock(variantId, quantity) {
+    return apiFetch(`/product-variants/${variantId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        body: JSON.stringify({
+            data: {
+                type: 'product-variants',
+                id: String(variantId),
+                attributes: {
+                    quantity: quantity
+                }
+            }
+        })
     });
-    return response.json();
 }
 
 // ─── SCANNER ─────────────────────────────────────────
@@ -715,7 +771,7 @@ function startScanner() {
         { facingMode: "environment" },
         scanConfig,
         onScanSuccess,
-        () => {} // ignore scan failures (no barcode in frame)
+        () => {}
     ).then(() => {
         isScanning = true;
         updateScannerStatus('Skann en strekkode...');
@@ -726,13 +782,11 @@ function startScanner() {
 }
 
 function onScanSuccess(decodedText) {
-    // Debounce: ignore same code within 3 seconds
     const now = Date.now();
     if (decodedText === lastScannedCode && (now - lastScanTime) < 3000) return;
     lastScannedCode = decodedText;
     lastScanTime = now;
 
-    // Vibrate feedback if available
     if (navigator.vibrate) navigator.vibrate(100);
 
     lookupProduct(decodedText);
@@ -745,41 +799,46 @@ function manualLookup() {
     lookupProduct(ean);
 }
 
-// Enter key in manual field
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('manualEan')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') manualLookup();
     });
 
     // Restore session
-    const d = sessionStorage.getItem('ms_domain');
+    const s = sessionStorage.getItem('ms_shopname');
     const k = sessionStorage.getItem('ms_apikey');
-    if (d) document.getElementById('storeDomain').value = d;
+    if (s) document.getElementById('shopName').value = s;
     if (k) document.getElementById('apiKey').value = k;
 });
 
 function lookupProduct(code) {
     updateScannerStatus('Søker: ' + code);
 
-    const product = productCache[code];
+    // Check cache: direct EAN, then SKU
+    const product = productCache[code] || productCache['sku:' + code];
     if (product) {
         showProductCard(product, code);
     } else {
-        // Try search API as fallback
-        const url = `${apiBase()}/products/search/${encodeURIComponent(code)}.json?api_key=${encodeURIComponent(config.apiKey)}`;
-        fetch(url)
-            .then(r => r.json())
+        // Fallback: search API by EAN filter on variants
+        apiFetch(`/product-variants?filter[ean][path]=ean&filter[ean][value]=${encodeURIComponent(code)}&page[size]=1`)
             .then(data => {
-                if (data.code === 200 && data.data?.data) {
-                    // Find first result
-                    const categories = data.data.data;
-                    for (const cat of Object.values(categories)) {
-                        if (cat.result_entries && cat.result_entries.length > 0) {
-                            const entry = cat.result_entries[0];
-                            // Fetch full product
-                            return fetchSingleProduct(entry.products_id);
-                        }
-                    }
+                if (data.data && data.data.length > 0) {
+                    const v = data.data[0];
+                    const productId = v.relationships?.product?.data?.id;
+                    // Fetch product name
+                    return apiFetch(`/products/${productId}?fields[products]=name`).then(pData => {
+                        const name = pData.data?.attributes?.name?.no || 'Ukjent';
+                        const entry = {
+                            productId: productId,
+                            variantId: v.id,
+                            name: name,
+                            ean: v.attributes.ean || '',
+                            sku: v.attributes.sku || '',
+                            quantity: parseInt(v.attributes.quantity) || 0
+                        };
+                        if (entry.ean) productCache[entry.ean] = entry;
+                        showProductCard(entry, code);
+                    });
                 }
                 showToast('Produkt ikke funnet: ' + code, 'error');
                 updateScannerStatus('Ikke funnet – prøv igjen');
@@ -791,32 +850,24 @@ function lookupProduct(code) {
     }
 }
 
-async function fetchSingleProduct(productId) {
-    const url = `${apiBase()}/products/product/${productId}.json?api_key=${encodeURIComponent(config.apiKey)}`;
-    const data = await fetch(url).then(r => r.json());
-    if (data.code === 200 && data.data?.product_data) {
-        const product = Object.values(data.data.product_data)[0];
-        if (product.products_ean) productCache[product.products_ean] = product;
-        showProductCard(product, product.products_ean || '');
-    }
-}
-
 function showProductCard(product, scannedCode) {
-    updateScannerStatus('Funnet! ✓');
-    const existing = countedItems.find(i => i.productId === product.products_id);
-    const currentQty = existing ? existing.newQty : parseInt(product.products_quantity) || 0;
+    updateScannerStatus('Funnet!');
+    const itemId = product.variantId || product.productId;
+    const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
+    const currentQty = existing ? existing.newQty : product.quantity;
 
     const html = `
         <div class="product-card">
-            <div class="product-name">${escHtml(product.products_name)}</div>
+            <div class="product-name">${escHtml(product.name)}</div>
             <div class="product-meta">
-                ${product.products_ean ? 'EAN: ' + escHtml(product.products_ean) + ' · ' : ''}
-                ${product.products_model ? 'Modell: ' + escHtml(product.products_model) + ' · ' : ''}
-                ID: ${product.products_id}
+                ${product.ean ? 'EAN: ' + escHtml(product.ean) + ' · ' : ''}
+                ${product.sku ? 'SKU: ' + escHtml(product.sku) + ' · ' : ''}
+                ${product.variantId ? 'Variant: ' + product.variantId + ' · ' : ''}
+                Produkt: ${product.productId}
             </div>
             <div class="stock-row">
                 <span class="stock-label">Nåværende lager:</span>
-                <span class="stock-value">${product.products_quantity || '0'}</span>
+                <span class="stock-value">${product.quantity}</span>
             </div>
             <div class="qty-input-row">
                 <label>Telt antall:</label>
@@ -825,7 +876,7 @@ function showProductCard(product, scannedCode) {
                     <input type="number" id="qtyInput" value="${existing ? currentQty : ''}" min="0" placeholder="0" inputmode="numeric">
                     <button onclick="stepQty(1)">+</button>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.products_id}', '${escAttr(product.products_name)}', '${escAttr(scannedCode)}', '${escAttr(product.products_model || '')}', ${parseInt(product.products_quantity) || 0})">
+                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${escAttr(product.name)}', '${escAttr(scannedCode)}', '${escAttr(product.sku || '')}', ${product.quantity})">
                     ${existing ? 'Oppdater' : 'Registrer'}
                 </button>
             </div>
@@ -833,7 +884,6 @@ function showProductCard(product, scannedCode) {
     `;
     document.getElementById('currentProduct').innerHTML = html;
 
-    // Focus qty input
     setTimeout(() => {
         const inp = document.getElementById('qtyInput');
         if (inp) inp.focus();
@@ -848,7 +898,7 @@ function stepQty(delta) {
     inp.value = val;
 }
 
-function registerCount(productId, name, ean, model, oldQty) {
+function registerCount(variantId, productId, name, ean, sku, oldQty) {
     const inp = document.getElementById('qtyInput');
     const newQty = parseInt(inp?.value);
     if (isNaN(newQty) || newQty < 0) {
@@ -856,13 +906,13 @@ function registerCount(productId, name, ean, model, oldQty) {
         return;
     }
 
-    // Update or add
-    const existing = countedItems.find(i => i.productId === productId);
+    const itemId = variantId || productId;
+    const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
     if (existing) {
         existing.newQty = newQty;
         existing.status = 'pending';
     } else {
-        countedItems.push({ productId, name, ean, model, oldQty, newQty, status: 'pending' });
+        countedItems.push({ variantId, productId, name, ean, sku, oldQty, newQty, status: 'pending' });
     }
 
     document.getElementById('currentProduct').innerHTML = '';
@@ -880,7 +930,6 @@ function updateCountedList() {
     }
 
     let html = '<div class="section-title">Telte varer (' + countedItems.length + ')</div>';
-    // Show newest first
     for (let i = countedItems.length - 1; i >= 0; i--) {
         const item = countedItems[i];
         const diff = item.newQty - item.oldQty;
@@ -892,7 +941,7 @@ function updateCountedList() {
             <div class="counted-item">
                 <div class="item-info">
                     <div class="item-name">${escHtml(item.name)}</div>
-                    <div class="item-ean">${item.ean || item.model || 'ID: ' + item.productId} · Før: ${item.oldQty} → ${item.newQty} (${diffStr})</div>
+                    <div class="item-ean">${item.ean || item.sku || 'ID: ' + (item.variantId || item.productId)} · ${item.oldQty} → ${item.newQty} (${diffStr})</div>
                 </div>
                 <span class="item-qty">${item.newQty}</span>
                 <span class="item-status ${statusClass}">${statusText}</span>
@@ -918,12 +967,12 @@ async function saveAllToMyStore() {
 
     for (const item of pending) {
         try {
-            const result = await updateProductStock(item.productId, item.newQty);
-            if (result.code === 200 || (result.data?.message?.success === 'true')) {
-                item.status = 'saved';
-            } else {
+            if (!item.variantId) {
                 item.status = 'error';
+                continue;
             }
+            await updateVariantStock(item.variantId, item.newQty);
+            item.status = 'saved';
         } catch (e) {
             item.status = 'error';
         }
@@ -945,10 +994,10 @@ function exportCSV() {
         showToast('Ingen varer å eksportere', 'error');
         return;
     }
-    const header = 'ProduktID;Navn;EAN;Modell;Gammelt antall;Nytt antall;Differanse;Status\n';
+    const header = 'VariantID;ProduktID;Navn;EAN;SKU;Gammelt antall;Nytt antall;Differanse;Status\n';
     const rows = countedItems.map(i => {
         const diff = i.newQty - i.oldQty;
-        return `${i.productId};"${i.name}";${i.ean};${i.model};${i.oldQty};${i.newQty};${diff};${i.status}`;
+        return `${i.variantId};${i.productId};"${i.name}";${i.ean};${i.sku};${i.oldQty};${i.newQty};${diff};${i.status}`;
     }).join('\n');
 
     const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' });
