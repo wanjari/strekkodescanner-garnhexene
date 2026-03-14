@@ -692,8 +692,9 @@ async function cacheAllVariants() {
     updateScannerStatus('Laster produkter...');
     let maxPages = 10; // Begrens til 10 sider for å unngå lang lasting
     while (hasMore && page <= maxPages) {
-        const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean&filter[status][path]=status&filter[status][value]=1`);
+        const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean`);
         const products = data.data || [];
+        addDebugLog(`Side ${page}: ${products.length} produkter`);
         for (const p of products) {
             const name = p.attributes.name?.no || p.attributes.name?.en || '';
             productNames[p.id] = name;
@@ -724,6 +725,7 @@ async function cacheAllVariants() {
     while (hasMore && page <= maxPagesVariants) {
         const data = await apiFetch(`/product-variants?page[size]=250&page[number]=${page}`);
         const variants = data.data || [];
+        addDebugLog(`Side ${page}: ${variants.length} varianter`);
         for (const v of variants) {
             const attr = v.attributes;
             const productId = v.relationships?.product?.data?.id;
@@ -751,6 +753,8 @@ async function cacheAllVariants() {
     }
 
     showToast(`${Object.keys(productNames).length} produkter, ${variantCount} varianter lastet`, 'success');
+    addDebugLog(`Lastet ${Object.keys(productNames).length} produkter, ${variantCount} varianter`);
+}
 }
 
 async function updateVariantStock(variantId, quantity) {
@@ -885,17 +889,18 @@ function lookupProduct(code) {
                 } else {
                     addDebugLog('Ikke funnet i varianter, søker produkter...');
                     // Fallback: søk på produkter uten varianter
-                    apiFetch(`/products?filter[ean][path]=ean&filter[ean][value]=${encodeURIComponent(code)}&page[size]=1`)
+                    apiFetch(`/products?page[size]=1000&page[number]=1&fields[products]=name,ean`)
                         .then(data => {
-                            if (data.data && data.data.length > 0) {
-                                const p = data.data[0];
+                            const products = data.data || [];
+                            const found = products.find(p => p.attributes.ean === code);
+                            if (found) {
                                 const entry = {
-                                    productId: p.id,
+                                    productId: found.id,
                                     variantId: null,
-                                    name: p.attributes.name?.no || p.attributes.name?.en || '',
-                                    ean: p.attributes.ean || '',
+                                    name: found.attributes.name?.no || found.attributes.name?.en || '',
+                                    ean: found.attributes.ean || '',
                                     sku: '',
-                                    quantity: parseInt(p.attributes.quantity) || 0
+                                    quantity: parseInt(found.attributes.quantity) || 0
                                 };
                                 if (entry.ean) productCache[entry.ean] = entry;
                                 addDebugLog('Funnet i produkter: ' + JSON.stringify(entry));
