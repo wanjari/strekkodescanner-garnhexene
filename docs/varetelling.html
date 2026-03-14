@@ -318,8 +318,6 @@
         #reader__dashboard { display: none !important; }
         #reader__scan_region { height: 100% !important; }
         #reader__scan_region img { display: none !important; }
-        #reader__scan_region > div { display: none !important; }
-        #qr-shaded-region { display: none !important; }
 
         .scanner-overlay {
             position: absolute;
@@ -333,9 +331,10 @@
         .scan-frame {
             width: 280px;
             height: 140px;
-            border: 2px solid rgba(168, 155, 254, 0.6);
+            border: 2px solid rgba(255, 255, 255, 0.75);
             border-radius: 12px;
             position: relative;
+            margin: 0;
         }
         .scan-frame::before {
             content: '';
@@ -1291,10 +1290,6 @@ function startScanner() {
 
     const scanConfig = {
         fps: 20,
-        qrbox: (viewfinderWidth, viewfinderHeight) => {
-            const w = Math.round(Math.min(viewfinderWidth * 0.85, 320));
-            return { width: w, height: Math.round(w * 0.45) };
-        },
         aspectRatio: 1.5,
         formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
