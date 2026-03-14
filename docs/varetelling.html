@@ -868,8 +868,30 @@ function lookupProduct(code) {
                 updateScannerStatus('Ikke funnet – prøv igjen');
             })
             .catch(() => {
-                showToast('Feil ved oppslag', 'error');
-                updateScannerStatus('Feil – prøv igjen');
+                // Fallback: søk på produkter uten varianter
+                apiFetch(`/products?filter[ean][path]=ean&filter[ean][value]=${encodeURIComponent(code)}&page[size]=1`)
+                    .then(data => {
+                        if (data.data && data.data.length > 0) {
+                            const p = data.data[0];
+                            const entry = {
+                                productId: p.id,
+                                variantId: null,
+                                name: p.attributes.name?.no || p.attributes.name?.en || '',
+                                ean: p.attributes.ean || '',
+                                sku: '',
+                                quantity: parseInt(p.attributes.quantity) || 0
+                            };
+                            if (entry.ean) productCache[entry.ean] = entry;
+                            showProductCard(entry, code);
+                        } else {
+                            showToast('Produkt ikke funnet: ' + code, 'error');
+                            updateScannerStatus('Ikke funnet – prøv igjen');
+                        }
+                    })
+                    .catch(() => {
+                        showToast('Feil ved oppslag', 'error');
+                        updateScannerStatus('Feil – prøv igjen');
+                    });
             });
     }
 }
