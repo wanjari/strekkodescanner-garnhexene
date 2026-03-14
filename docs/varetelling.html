@@ -675,6 +675,24 @@
         .more-dropdown button:hover { background: var(--border); }
         .more-dropdown button + button { border-top: 1px solid var(--border); }
 
+        /* Progress bar */
+        .load-progress { margin-top: 20px; display: none; }
+        .load-progress.visible { display: block; }
+        .load-progress-label { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; text-align: center; }
+        .load-progress-track {
+            width: 100%; height: 6px;
+            background: var(--border);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+        .load-progress-bar {
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            border-radius: 99px;
+            transition: width 0.35s ease;
+        }
+
         /* Toast */
         .toast {
             position: fixed;
@@ -787,7 +805,10 @@
                 <div class="more-dropdown" id="moreDropdown">
                     <button onclick="exportCSV(); closeMoreMenu()">📥 Eksporter CSV</button>
                     <button onclick="showDebugLog(); closeMoreMenu()">🐛 Feilsøkingslogg</button>
-                    <button onclick="logoutAndReset(); closeMoreMenu()">🔒 Nullstill innstillinger</button>
+                    <button onclick="logoutAndReset(); closeMoreMenu()">
+                        🔒 Nullstill innstillinger
+                        <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Sletter API-nøkkel og PIN fra denne enheten</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -808,6 +829,17 @@ let debugLog = [];  // For å lagre siste loggmeldinger
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
     if (debugLog.length > 10) debugLog.shift();  // Behold kun siste 10
+}
+
+function setProgress(pct, label) {
+    const bar  = document.getElementById('loadProgressBar');
+    const lbl  = document.getElementById('loadProgressLabel');
+    const wrap = document.getElementById('loadProgress');
+    if (!bar) return;
+    if (pct === null) { wrap.classList.remove('visible'); return; }
+    wrap.classList.add('visible');
+    bar.style.width = pct + '%';
+    if (label) lbl.textContent = label;
 }
 
 function toggleMoreMenu(e) {
@@ -877,6 +909,10 @@ function renderSetupScreen() {
                 style="margin-top:12px; background:transparent; color:var(--text-muted); border:none; font-size:13px;">
                 Bruk andre innstillinger &rarr;
             </button>
+            <div class="load-progress" id="loadProgress">
+                <div class="load-progress-label" id="loadProgressLabel">Laster...</div>
+                <div class="load-progress-track"><div class="load-progress-bar" id="loadProgressBar"></div></div>
+            </div>
         `;
         setTimeout(() => document.getElementById('pinInput')?.focus(), 100);
     } else {
@@ -958,12 +994,14 @@ async function unlockWithPin() {
     btn.disabled = true;
 
     try {
+        setProgress(10, 'Dekrypterer...');
         const creds = await decryptCredentials(stored, pin);
         config.shopName = creds.shopName;
         config.apiKey   = creds.apiKey;
 
         showToast('Tilkoblet! Laster produkter...', 'success');
-        await cacheAllVariants();
+        await cacheAllVariants(setProgress);
+        setProgress(null);
         goToScanner();
     } catch (err) {
         const isCryptoErr = err.name === 'OperationError';
@@ -1069,8 +1107,13 @@ async function fetchAllPages(path, maxPages = 50) {
     return allItems;
 }
 
-async function cacheAllVariants() {
+async function cacheAllVariants(onProgress = null) {
+    const prog = async (pct, lbl) => {
+        if (onProgress) onProgress(pct, lbl);
+        await new Promise(r => requestAnimationFrame(r)); // la nettleseren tegne om
+    };
     updateScannerStatus('Laster data parallelt...');
+    await prog(20, 'Laster produkter og attributter...');
 
     // Last produkter, opsjonsverdier og produktattributter samtidig
     const [products, optionValues, productAttrs] = await Promise.all([
@@ -1080,6 +1123,7 @@ async function cacheAllVariants() {
     ]);
 
     addDebugLog(`Lastet parallelt: ${products.length} produkter, ${optionValues.length} opsjonsverdier, ${productAttrs.length} produktattributter`);
+    await prog(55, 'Laster varianter...');
 
     // Bygg produktnavn-kart
     const productNames = {};
@@ -1118,6 +1162,7 @@ async function cacheAllVariants() {
     updateScannerStatus('Laster varianter...');
     const variants = await fetchAllPages('/product-variants?page[size]=250');
     addDebugLog(`Lastet ${variants.length} varianter`);
+    await prog(80, 'Bygger produktkart...');
     if (variants.length > 0) addDebugLog('Eksempel variant-objekt: ' + JSON.stringify(variants[0]));
 
     let variantCount = 0;
@@ -1147,6 +1192,7 @@ async function cacheAllVariants() {
         variantCount++;
     }
 
+    await prog(100, 'Ferdig!');
     showToast(`${products.length} produkter, ${variantCount} varianter lastet`, 'success');
     addDebugLog(`Ferdig: ${products.length} produkter, ${variantCount} varianter`);
 }
