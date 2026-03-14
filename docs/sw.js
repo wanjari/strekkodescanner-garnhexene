@@ -1,15 +1,11 @@
-const CACHE = 'varetelling-v2';
-const ASSETS = [
-    './',
-    './varetelling.html',
-    './manifest.json',
-    'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
-    'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap'
-];
+const CACHE = 'varetelling-v3';
 
 self.addEventListener('install', e => {
+    // Cache kun selve HTML-filen ved install
     e.waitUntil(
-        caches.open(CACHE).then(cache => cache.addAll(ASSETS))
+        caches.open(CACHE).then(cache =>
+            cache.addAll(['./varetelling.html', './manifest.json'])
+        ).catch(() => {}) // ikke krasj hvis noe feiler
     );
     self.skipWaiting();
 });
@@ -24,18 +20,25 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-    // Ikke cache MyStore API-kall
-    if (e.request.url.includes('api.mystore.no')) return;
+    const url = e.request.url;
+
+    // Send API-kall direkte uten å røre dem
+    if (url.includes('api.mystore.no') ||
+        url.includes('fonts.googleapis.com') ||
+        url.includes('fonts.gstatic.com') ||
+        url.includes('unpkg.com')) {
+        return; // la nettleseren håndtere det
+    }
 
     e.respondWith(
         caches.match(e.request).then(cached => {
             if (cached) return cached;
             return fetch(e.request).then(response => {
-                if (!response || response.status !== 200 || response.type === 'opaque') return response;
+                if (!response || response.status !== 200) return response;
                 const clone = response.clone();
-                caches.open(CACHE).then(cache => cache.put(e.request, clone));
+                caches.open(CACHE).then(cache => cache.put(e.request, clone)).catch(() => {});
                 return response;
-            });
+            }).catch(() => caches.match('./varetelling.html'));
         })
     );
 });

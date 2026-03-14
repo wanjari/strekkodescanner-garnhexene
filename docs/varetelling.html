@@ -318,6 +318,7 @@
         #reader__dashboard { display: none !important; }
         #reader__scan_region { height: 100% !important; }
         #reader__scan_region img { display: none !important; }
+        #reader__scan_region > div { display: none !important; }
 
         .scanner-overlay {
             position: absolute;
@@ -334,7 +335,6 @@
             border: 2px solid rgba(168, 155, 254, 0.6);
             border-radius: 12px;
             position: relative;
-            margin-bottom: 48px;
         }
         .scan-frame::before {
             content: '';
@@ -831,6 +831,9 @@
                 </button>
                 <div class="more-dropdown" id="moreDropdown">
                     <button onclick="exportCSV(); closeMoreMenu()">📥 Eksporter CSV</button>
+                    <button onclick="refreshProductCache()">🔄 Oppdater produktliste
+                        <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tving ny nedlasting fra MyStore</span>
+                    </button>
                     <button onclick="showDebugLog(); closeMoreMenu()">🐛 Feilsøkingslogg</button>
                     <button onclick="logoutAndReset(); closeMoreMenu()">
                         🔒 Nullstill innstillinger
@@ -882,6 +885,8 @@ document.addEventListener('click', () => closeMoreMenu());
 
 // ─── KRYPTO (AES-256-GCM + PBKDF2) ──────────────────
 const STORAGE_KEY = 'ms_enc_v1';
+const PRODUCT_CACHE_KEY = 'ms_product_cache';
+const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 
 async function deriveKey(pin, salt) {
     const keyMaterial = await crypto.subtle.importKey(
@@ -1049,6 +1054,7 @@ function logoutAndReset() {
         'API-nøkkelen fjernes fra denne enheten. Du må taste den inn på nytt.',
         () => {
             localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(PRODUCT_CACHE_KEY);
             config = { shopName: '', apiKey: '' };
             productCache = {};
             countedItems = [];
@@ -1132,10 +1138,29 @@ async function fetchAllPages(path, maxPages = 50) {
     return allItems;
 }
 
-async function cacheAllVariants(onProgress = null) {
+async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     const prog = async (pct, lbl) => {
         if (onProgress) await onProgress(pct, lbl);
     };
+
+    // Bruk localStorage-cache hvis fersk nok
+    if (!forceRefresh) {
+        try {
+            const saved = localStorage.getItem(PRODUCT_CACHE_KEY);
+            if (saved) {
+                const { ts, data } = JSON.parse(saved);
+                if (Date.now() - ts < PRODUCT_CACHE_MAX_AGE) {
+                    productCache = data;
+                    const count = Object.keys(data).length;
+                    await prog(100, 'Ferdig!');
+                    showToast(`Produktcache lastet (${Math.round((Date.now()-ts)/60000)} min siden)`, 'success');
+                    addDebugLog(`Brukte localStorage-cache: ${count} oppføringer`);
+                    return;
+                }
+            }
+        } catch(e) { addDebugLog('Cache-les feil: ' + e.message); }
+    }
+
     updateScannerStatus('Laster data parallelt...');
     await prog(20, 'Laster produkter og attributter...');
 
@@ -1215,6 +1240,12 @@ async function cacheAllVariants(onProgress = null) {
         productCache['vid:' + v.id] = entry;
         variantCount++;
     }
+
+    // Lagre cache til localStorage
+    try {
+        localStorage.setItem(PRODUCT_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: productCache }));
+        addDebugLog('Produktcache lagret til localStorage');
+    } catch(e) { addDebugLog('Cache-lagring feil: ' + e.message); }
 
     await prog(100, 'Ferdig!');
     showToast(`${products.length} produkter, ${variantCount} varianter lastet`, 'success');
@@ -1544,6 +1575,14 @@ function updateCountedList() {
         `;
     }
     document.getElementById('countedSection').innerHTML = html;
+}
+
+async function refreshProductCache() {
+    closeMoreMenu();
+    showToast('Oppdaterer produktliste fra MyStore...', 'success');
+    productCache = {};
+    localStorage.removeItem(PRODUCT_CACHE_KEY);
+    await cacheAllVariants(null, true);
 }
 
 // Slett alle telte varer
