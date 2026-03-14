@@ -328,28 +328,8 @@
             pointer-events: none;
             z-index: 10;
         }
-        .scan-frame {
-            width: 280px;
-            height: 140px;
-            border: 2px solid rgba(255, 255, 255, 0.75);
-            border-radius: 12px;
-            position: relative;
-            margin: 0;
-        }
-        .scan-frame::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 8px;
-            right: 8px;
-            height: 2px;
-            background: var(--accent-light);
-            animation: scanline 2s ease-in-out infinite;
-        }
-        @keyframes scanline {
-            0%, 100% { opacity: 0.3; }
-            50% { opacity: 1; }
-        }
+
+
 
         .scanner-status {
             position: absolute;
@@ -794,9 +774,7 @@
     <div class="scanner-layout">
         <div class="scanner-area">
             <div id="reader"></div>
-            <div class="scanner-overlay">
-                <div class="scan-frame"></div>
-            </div>
+
             <div class="scanner-status" id="scannerStatus">Klar til skanning...</div>
         </div>
 
@@ -1314,6 +1292,15 @@ function startScanner() {
     ).then(() => {
         isScanning = true;
         updateScannerStatus('Skann en strekkode...');
+        // Fjern den lilla shaded-region som biblioteket injiserer i DOM
+        const readerEl = document.getElementById('reader');
+        const removeShadedRegion = () => {
+            const el = document.getElementById('qr-shaded-region');
+            if (el) el.remove();
+        };
+        removeShadedRegion();
+        const obs = new MutationObserver(removeShadedRegion);
+        obs.observe(readerEl, { childList: true, subtree: true });
     }).catch(err => {
         console.error('Kamera-feil:', err);
         updateScannerStatus('Kamera ikke tilgjengelig – bruk manuelt felt. Feil: ' + err.message);
