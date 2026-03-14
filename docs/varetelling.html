@@ -1131,7 +1131,7 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
                     productCache = data;
                     const count = Object.keys(data).length;
                     await prog(100, 'Ferdig!');
-                    showToast(`Produktcache lastet (${Math.round((Date.now()-ts)/60000)} min siden)`, 'success');
+                    console.log(`Produktcache lastet fra localStorage (${Math.round((Date.now()-ts)/60000)} min siden, ${count} oppføringer)`);
                     addDebugLog(`Brukte localStorage-cache: ${count} oppføringer`);
                     return;
                 }
