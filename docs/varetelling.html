@@ -211,8 +211,8 @@
             z-index: 10;
         }
         .scan-frame {
-            width: 220px;
-            height: 120px;
+            width: 280px;
+            height: 140px;
             border: 2px solid rgba(168, 155, 254, 0.6);
             border-radius: 12px;
             position: relative;
@@ -773,8 +773,8 @@ function startScanner() {
     html5QrCode = new Html5Qrcode("reader");
 
     const scanConfig = {
-        fps: 10,
-        qrbox: { width: 220, height: 120 },
+        fps: 20,
+        qrbox: { width: 280, height: 140 },
         aspectRatio: 1.5,
         formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
@@ -783,6 +783,8 @@ function startScanner() {
             Html5QrcodeSupportedFormats.UPC_E,
             Html5QrcodeSupportedFormats.CODE_128,
             Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.CODE_93,
+            Html5QrcodeSupportedFormats.CODABAR,
         ]
     };
 
