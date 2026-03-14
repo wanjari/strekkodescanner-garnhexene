@@ -790,13 +790,16 @@ function startScanner() {
         { facingMode: "environment" },
         scanConfig,
         onScanSuccess,
-        () => {}
+        (errorMessage) => {
+            // Logg feil for debugging
+            console.log('Skanningsfeil:', errorMessage);
+        }
     ).then(() => {
         isScanning = true;
         updateScannerStatus('Skann en strekkode...');
     }).catch(err => {
         console.error('Kamera-feil:', err);
-        updateScannerStatus('Kamera ikke tilgjengelig – bruk manuelt felt');
+        updateScannerStatus('Kamera ikke tilgjengelig – bruk manuelt felt. Feil: ' + err.message);
     });
 }
 
