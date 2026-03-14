@@ -1,4 +1,4 @@
-const CACHE = 'varetelling-v1';
+const CACHE = 'varetelling-v2';
 const ASSETS = [
     './',
     './varetelling.html',
