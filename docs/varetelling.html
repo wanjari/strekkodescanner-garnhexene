@@ -1005,7 +1005,7 @@ function apiBase() {
     return `https://api.mystore.no/shops/${config.shopName}`;
 }
 
-function apiFetch(path, options = {}) {
+async function apiFetch(path, options = {}, _retry = 0) {
     const url = apiBase() + path;
     const headers = {
         'Authorization': `Bearer ${config.apiKey}`,
@@ -1013,27 +1013,25 @@ function apiFetch(path, options = {}) {
         ...(options.headers || {})
     };
 
-    return fetch(url, { ...options, headers }).then(async r => {
-        const text = await r.text();
+    const r = await fetch(url, { ...options, headers });
+    const text = await r.text();
 
-        let data = null;
-        try {
-            data = text ? JSON.parse(text) : null;
-        } catch {
-            data = text;
-        }
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
-        if (!r.ok) {
-            console.error('API error', {
-                url,
-                status: r.status,
-                response: data
-            });
-            throw new Error(`HTTP ${r.status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
-        }
+    if (r.status === 429 && _retry < 5) {
+        const wait = (2 ** _retry) * 1000; // 1s, 2s, 4s, 8s, 16s
+        addDebugLog(`429 rate limit – venter ${wait / 1000}s (forsøk ${_retry + 1})`);
+        await new Promise(res => setTimeout(res, wait));
+        return apiFetch(path, options, _retry + 1);
+    }
 
-        return data;
-    });
+    if (!r.ok) {
+        console.error('API error', { url, status: r.status, response: data });
+        throw new Error(`HTTP ${r.status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+    }
+
+    return data;
 }
 
 // Hjelpefunksjon: hent alle sider for et endepunkt parallelt
