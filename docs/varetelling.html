@@ -1235,7 +1235,10 @@ function startScanner() {
 
     const scanConfig = {
         fps: 20,
-        qrbox: { width: 280, height: 140 },
+        qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const w = Math.round(Math.min(viewfinderWidth * 0.85, 320));
+            return { width: w, height: Math.round(w * 0.45) };
+        },
         aspectRatio: 1.5,
         formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
