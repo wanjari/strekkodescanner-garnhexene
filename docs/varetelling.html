@@ -373,6 +373,8 @@
             overflow-y: auto;
             padding: 20px;
             padding-bottom: 100px;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         /* Manual entry */
@@ -380,6 +382,8 @@
             display: flex;
             gap: 8px;
             margin-bottom: 20px;
+            width: 100%;
+            box-sizing: border-box;
         }
         .manual-entry input {
             flex: 1;
@@ -801,7 +805,11 @@
         </div>
 
         <div class="bottom-bar">
-            <button class="btn btn-success" onclick="saveAllToMyStore()">
+            <div id="saveProgressWrap" style="display:none; position:absolute; left:0; right:0; top:-52px; padding:0 20px;">
+                <div class="load-progress-label" id="saveProgressLabel" style="font-size:13px; color:var(--text-muted); margin-bottom:4px; text-align:center;"></div>
+                <div class="load-progress-track"><div class="load-progress-bar" id="saveProgressBar"></div></div>
+            </div>
+            <button class="btn btn-success" id="saveBtn" onclick="saveAllToMyStore()">
                 Lagre alle til Garnhexene varelager
             </button>
             <div class="more-menu" id="moreMenu">
@@ -1403,7 +1411,8 @@ function showProductCard(product, scannedCode) {
     const currentQty = existing ? existing.newQty : product.quantity;
 
     const html = `
-        <div class="product-card">
+        <div class="product-card" style="position:relative;">
+            <button onclick="document.getElementById('currentProduct').innerHTML=''" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
             ${existing ? `
             <div class="already-counted-banner">
                 ⚠️ Allerede telt – tidligere antall: <strong>${existing.newQty}</strong>
@@ -1486,7 +1495,12 @@ function updateCountedList() {
         return;
     }
 
-    let html = '<div class="section-title">Telte varer (' + countedItems.length + ')</div>';
+    let html = `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <div class="section-title" style="margin-bottom:0;">Telte varer (${countedItems.length})</div>
+            <button onclick="deleteAllCounted()" style="font-size:12px; padding:5px 14px; border-radius:6px; background:transparent; color:var(--danger); border:1px solid var(--danger); font-weight:500; cursor:pointer;">Slett alle</button>
+        </div>
+    `;
     for (let i = countedItems.length - 1; i >= 0; i--) {
         const item = countedItems[i];
         const diff = item.newQty - item.oldQty;
@@ -1517,6 +1531,20 @@ function updateCountedList() {
         `;
     }
     document.getElementById('countedSection').innerHTML = html;
+}
+
+// Slett alle telte varer
+function deleteAllCounted() {
+    if (countedItems.length === 0) return;
+    showConfirm(
+        'Slett alle telte varer?',
+        `${countedItems.length} vare${countedItems.length === 1 ? '' : 'r'} vil bli fjernet fra tellelisten.`,
+        () => {
+            countedItems = [];
+            updateCountedList();
+            updateBadge();
+        }
+    );
 }
 
 // Slett en telt vare fra listen
@@ -1613,23 +1641,46 @@ async function saveAllToMyStore() {
         return;
     }
 
+    const saveBtn = document.getElementById('saveBtn');
+    const wrap    = document.getElementById('saveProgressWrap');
+    const bar     = document.getElementById('saveProgressBar');
+    const lbl     = document.getElementById('saveProgressLabel');
+
+    saveBtn.disabled = true;
+    wrap.style.display = 'block';
+    bar.style.width = '0%';
+
+    let done = 0;
     for (const item of pending) {
+        const name = [item.name, item.variantName].filter(Boolean).join(' – ');
+        lbl.textContent = `Lagrer ${done + 1} av ${pending.length}: ${name}`;
+        bar.style.width = Math.round((done / pending.length) * 100) + '%';
+        await new Promise(r => requestAnimationFrame(r));
+
         try {
             if (!item.variantId) {
-                // For produkter uten varianter, oppdater produktet direkte
                 await updateProductStock(item.productId, item.newQty);
                 item.status = 'saved';
             } else {
-                // For varianter, oppdater varianten
                 await updateVariantStock(item.variantId, item.newQty);
                 item.status = 'saved';
             }
+            const cacheKey = item.variantId ? 'vid:' + item.variantId : item.ean;
+            if (cacheKey && productCache[cacheKey]) productCache[cacheKey].quantity = item.newQty;
+            if (item.ean && productCache[item.ean]) productCache[item.ean].quantity = item.newQty;
         } catch (e) {
             item.status = 'error';
             console.error('Lagring feilet for vare:', item, e);
             showToast(`Feil ved lagring: ${e.message}`, 'error');
         }
+        done++;
     }
+
+    bar.style.width = '100%';
+    lbl.textContent = `Ferdig! ${done} vare${done === 1 ? '' : 'r'} lagret.`;
+    await new Promise(r => setTimeout(r, 1200));
+    wrap.style.display = 'none';
+    saveBtn.disabled = false;
 
     updateCountedList();
 }
