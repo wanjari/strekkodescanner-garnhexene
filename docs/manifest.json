@@ -1,0 +1,12 @@
+{
+    "name": "Varetelling – Garnhexene",
+    "short_name": "Varetelling",
+    "start_url": "./varetelling.html",
+    "display": "standalone",
+    "background_color": "#1a1a2e",
+    "theme_color": "#1a1a2e",
+    "icons": [
+        { "src": "icon.png", "sizes": "180x180", "type": "image/png" },
+        { "src": "icon.png", "sizes": "512x512", "type": "image/png" }
+    ]
+}
