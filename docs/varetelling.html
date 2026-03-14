@@ -609,6 +609,7 @@ function addDebugLog(message) {
 
 // ─── SETUP ───────────────────────────────────────────
 function connect() {
+    addDebugLog('Connect startet');
     const shopName = document.getElementById('shopName').value.trim();
     const apiKey = document.getElementById('apiKey').value.trim();
     if (!shopName || !apiKey) {
@@ -625,10 +626,11 @@ function connect() {
     const btn = document.getElementById('connectBtn');
     btn.innerHTML = '<span class="spinner"></span> Kobler til...';
     btn.disabled = true;
-
+    addDebugLog('API test kall');
     // Test connection by fetching first page of products
     apiFetch('/products?page[size]=1&page[number]=1')
         .then(data => {
+            addDebugLog('API test ok, starter cache');
             if (data.data) {
                 showToast('Tilkoblet! Laster produkter og varianter...', 'success');
                 cacheAllVariants().then(() => {
@@ -641,6 +643,7 @@ function connect() {
             }
         })
         .catch(err => {
+            addDebugLog('API test feilet: ' + err.message);
             showToast('Kunne ikke koble til: ' + err.message, 'error');
             btn.innerHTML = 'Koble til og start';
             btn.disabled = false;
@@ -755,7 +758,7 @@ async function cacheAllVariants() {
     showToast(`${Object.keys(productNames).length} produkter, ${variantCount} varianter lastet`, 'success');
     addDebugLog(`Lastet ${Object.keys(productNames).length} produkter, ${variantCount} varianter`);
 }
-}
+
 
 async function updateVariantStock(variantId, quantity) {
     return apiFetch(`/product-variants/${variantId}`, {
