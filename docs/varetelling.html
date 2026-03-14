@@ -245,6 +245,9 @@
             border-radius: 20px;
             z-index: 10;
             white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         /* Content below scanner */
@@ -687,7 +690,8 @@ async function cacheAllVariants() {
     const productNames = {}; // productId → name
 
     updateScannerStatus('Laster produkter...');
-    while (hasMore) {
+    let maxPages = 10; // Begrens til 10 sider for å unngå lang lasting
+    while (hasMore && page <= maxPages) {
         const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean&filter[status][path]=status&filter[status][value]=1`);
         const products = data.data || [];
         for (const p of products) {
@@ -707,16 +711,17 @@ async function cacheAllVariants() {
         }
         hasMore = products.length === 250;
         page++;
-        updateScannerStatus(`Laster produkter... (${Object.keys(productNames).length} lastet)`);
+        updateScannerStatus(`Laster produkter... (${Object.keys(productNames).length} lastet, side ${page-1})`);
     }
 
     // Step 2: Load all product-variants (for EAN + stock)
     page = 1;
     hasMore = true;
     let variantCount = 0;
+    let maxPagesVariants = 10; // Begrens til 10 sider
 
     updateScannerStatus('Laster varianter...');
-    while (hasMore) {
+    while (hasMore && page <= maxPagesVariants) {
         const data = await apiFetch(`/product-variants?page[size]=250&page[number]=${page}`);
         const variants = data.data || [];
         for (const v of variants) {
@@ -742,7 +747,7 @@ async function cacheAllVariants() {
         }
         hasMore = variants.length === 250;
         page++;
-        updateScannerStatus(`Laster varianter... (${variantCount} lastet)`);
+        updateScannerStatus(`Laster varianter... (${variantCount} lastet, side ${page-1})`);
     }
 
     showToast(`${Object.keys(productNames).length} produkter, ${variantCount} varianter lastet`, 'success');
@@ -1089,6 +1094,17 @@ function addDebugLog(message) {
 
 function showDebugLog() {
     alert('Siste debug-logger:\n' + debugLog.join('\n'));
+}
+
+function updateScannerStatus(text) {
+    const el = document.getElementById('scannerStatus');
+    if (el) {
+        if (text.includes('Laster')) {
+            el.innerHTML = '<span class="spinner"></span> ' + text;
+        } else {
+            el.textContent = text;
+        }
+    }
 }
 
 function showToast(msg, type = '') {
