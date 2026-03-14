@@ -691,17 +691,7 @@ async function cacheAllVariants() {
                     variantId: null,
                     name: name,
                     ean: p.attributes.ean,
-                    sku: p.attributes.sku || '',
-                    quantity: 0
-                };
-            }
-            if (p.attributes.sku) {
-                productCache['sku:' + p.attributes.sku] = {
-                    productId: p.id,
-                    variantId: null,
-                    name: name,
-                    ean: p.attributes.ean || '',
-                    sku: p.attributes.sku,
+                    sku: '',
                     quantity: 0
                 };
             }
@@ -735,10 +725,6 @@ async function cacheAllVariants() {
             // Index by EAN
             if (attr.ean) {
                 productCache[attr.ean] = entry;
-            }
-            // Index by SKU
-            if (attr.sku) {
-                productCache['sku:' + attr.sku] = entry;
             }
             // Index by variant ID
             productCache['vid:' + v.id] = entry;
@@ -847,8 +833,8 @@ document.addEventListener('DOMContentLoaded', () => {
 function lookupProduct(code) {
     updateScannerStatus('Søker: ' + code);
 
-    // Check cache: direct EAN, then SKU
-    const product = productCache[code] || productCache['sku:' + code];
+    // Check cache: direct EAN
+    const product = productCache[code];
     if (product) {
         showProductCard(product, code);
     } else {
@@ -894,7 +880,6 @@ function showProductCard(product, scannedCode) {
             <div class="product-name">${escHtml(product.name)}</div>
             <div class="product-meta">
                 ${product.ean ? 'EAN: ' + escHtml(product.ean) + ' · ' : ''}
-                ${product.sku ? 'SKU: ' + escHtml(product.sku) + ' · ' : ''}
                 ${product.variantId ? 'Variant: ' + product.variantId + ' · ' : ''}
                 Produkt: ${product.productId}
             </div>
@@ -909,7 +894,7 @@ function showProductCard(product, scannedCode) {
                     <input type="number" id="qtyInput" value="${existing ? currentQty : ''}" min="0" placeholder="0" inputmode="numeric">
                     <button onclick="stepQty(1)">+</button>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${escAttr(product.name)}', '${escAttr(scannedCode)}', '${escAttr(product.sku || '')}', ${product.quantity})">
+                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${escAttr(product.name)}', '${escAttr(scannedCode)}', ${product.quantity})">
                     ${existing ? 'Oppdater' : 'Registrer'}
                 </button>
             </div>
@@ -931,7 +916,7 @@ function stepQty(delta) {
     inp.value = val;
 }
 
-function registerCount(variantId, productId, name, ean, sku, oldQty) {
+function registerCount(variantId, productId, name, ean, oldQty) {
     const inp = document.getElementById('qtyInput');
     const newQty = parseInt(inp?.value);
     if (isNaN(newQty) || newQty < 0) {
@@ -945,7 +930,7 @@ function registerCount(variantId, productId, name, ean, sku, oldQty) {
         existing.newQty = newQty;
         existing.status = 'pending';
     } else {
-        countedItems.push({ variantId, productId, name, ean, sku, oldQty, newQty, status: 'pending' });
+        countedItems.push({ variantId, productId, name, ean, sku: '', oldQty, newQty, status: 'pending' });
     }
 
     document.getElementById('currentProduct').innerHTML = '';
@@ -974,7 +959,7 @@ function updateCountedList() {
             <div class="counted-item">
                 <div class="item-info">
                     <div class="item-name">${escHtml(item.name)}</div>
-                    <div class="item-ean">${item.ean || item.sku || 'ID: ' + (item.variantId || item.productId)} · ${item.oldQty} → ${item.newQty} (${diffStr})</div>
+                    <div class="item-ean">${item.ean || 'ID: ' + (item.variantId || item.productId)} · ${item.oldQty} → ${item.newQty} (${diffStr})</div>
                 </div>
                 <span class="item-qty">${item.newQty}</span>
                 <span class="item-status ${statusClass}">${statusText}</span>
@@ -1000,13 +985,14 @@ async function saveAllToMyStore() {
     for (const item of pending) {
         try {
             if (!item.variantId) {
-                item.status = 'error';
-                console.error('Mangler variantId', item);
-                continue;
+                // For produkter uten varianter, oppdater produktet direkte
+                await updateProductStock(item.productId, item.newQty);
+                item.status = 'saved';
+            } else {
+                // For varianter, oppdater varianten
+                await updateVariantStock(item.variantId, item.newQty);
+                item.status = 'saved';
             }
-
-            await updateVariantStock(item.variantId, item.newQty);
-            item.status = 'saved';
         } catch (e) {
             item.status = 'error';
             console.error('Lagring feilet for vare:', item, e);
@@ -1023,10 +1009,10 @@ function exportCSV() {
         showToast('Ingen varer å eksportere', 'error');
         return;
     }
-    const header = 'VariantID;ProduktID;Navn;EAN;SKU;Gammelt antall;Nytt antall;Differanse;Status\n';
+    const header = 'VariantID;ProduktID;Navn;EAN;Gammelt antall;Nytt antall;Differanse;Status\n';
     const rows = countedItems.map(i => {
         const diff = i.newQty - i.oldQty;
-        return `${i.variantId};${i.productId};"${i.name}";${i.ean};${i.sku};${i.oldQty};${i.newQty};${diff};${i.status}`;
+        return `${i.variantId};${i.productId};"${i.name}";${i.ean};${i.oldQty};${i.newQty};${diff};${i.status}`;
     }).join('\n');
 
     const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' });
