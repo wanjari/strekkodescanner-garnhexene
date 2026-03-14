@@ -688,7 +688,7 @@ async function cacheAllVariants() {
 
     updateScannerStatus('Laster produkter...');
     while (hasMore) {
-        const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean`);
+        const data = await apiFetch(`/products?page[size]=250&page[number]=${page}&fields[products]=name,sku,ean&filter[status][path]=status&filter[status][value]=1`);
         const products = data.data || [];
         for (const p of products) {
             const name = p.attributes.name?.no || p.attributes.name?.en || '';
@@ -707,6 +707,7 @@ async function cacheAllVariants() {
         }
         hasMore = products.length === 250;
         page++;
+        updateScannerStatus(`Laster produkter... (${Object.keys(productNames).length} lastet)`);
     }
 
     // Step 2: Load all product-variants (for EAN + stock)
@@ -741,6 +742,7 @@ async function cacheAllVariants() {
         }
         hasMore = variants.length === 250;
         page++;
+        updateScannerStatus(`Laster varianter... (${variantCount} lastet)`);
     }
 
     showToast(`${Object.keys(productNames).length} produkter, ${variantCount} varianter lastet`, 'success');
