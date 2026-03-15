@@ -864,6 +864,7 @@ document.addEventListener('click', () => closeMoreMenu());
 // ─── KRYPTO (AES-256-GCM + PBKDF2) ──────────────────
 const STORAGE_KEY = 'ms_enc_v1';
 const PRODUCT_CACHE_KEY = 'ms_product_cache';
+const PRODUCT_CACHE_VERSION = 2;  // øk ved format-endringer for å tvinge reload
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 
 async function deriveKey(pin, salt) {
@@ -1126,8 +1127,8 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
         try {
             const saved = localStorage.getItem(PRODUCT_CACHE_KEY);
             if (saved) {
-                const { ts, data } = JSON.parse(saved);
-                if (Date.now() - ts < PRODUCT_CACHE_MAX_AGE) {
+                const { ts, data, v } = JSON.parse(saved);
+                if (v === PRODUCT_CACHE_VERSION && Date.now() - ts < PRODUCT_CACHE_MAX_AGE) {
                     productCache = data;
                     const count = Object.keys(data).length;
                     await prog(100, 'Ferdig!');
@@ -1156,7 +1157,7 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     const productNames = {};
     const allProductEANs = [];
     for (const p of products) {
-        const name = p.attributes.name?.no || p.attributes.name?.en || '';
+        const name = decodeHtmlEntities(p.attributes.name?.no || p.attributes.name?.en || '');
         productNames[p.id] = name;
         if (p.attributes.ean) {
             productCache[p.attributes.ean] = {
@@ -1171,8 +1172,9 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     const optionValueNames = {};
     for (const ov of optionValues) {
         const n = ov.attributes?.name;
-        optionValueNames[ov.id] = (n && typeof n === 'object')
+        const raw = (n && typeof n === 'object')
             ? (n.no || n.en || Object.values(n)[0] || '') : (n || '');
+        optionValueNames[ov.id] = decodeHtmlEntities(raw);
     }
     if (optionValues.length > 0) addDebugLog('Eksempel opsjonverdi: ' + JSON.stringify(optionValues[0]));
 
@@ -1197,7 +1199,7 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     for (const v of variants) {
         const attr = v.attributes;
         const productId = v.relationships?.product?.data?.id;
-        const name = productNames[productId] || 'Ukjent produkt';
+        const name = decodeHtmlEntities(productNames[productId] || 'Ukjent produkt');
 
         const paIds = (v.relationships?.['product-attributes']?.data || []).map(d => d.id);
         const vNameParts = paIds
@@ -1221,7 +1223,7 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
 
     // Lagre cache til localStorage
     try {
-        localStorage.setItem(PRODUCT_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: productCache }));
+        localStorage.setItem(PRODUCT_CACHE_KEY, JSON.stringify({ v: PRODUCT_CACHE_VERSION, ts: Date.now(), data: productCache }));
         addDebugLog('Produktcache lagret til localStorage');
     } catch(e) { addDebugLog('Cache-lagring feil: ' + e.message); }
 
@@ -1750,6 +1752,12 @@ function escHtml(str) {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
+}
+function decodeHtmlEntities(str) {
+    if (!str) return '';
+    const txt = document.createElement('textarea');
+    txt.innerHTML = str;
+    return txt.value;
 }
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
