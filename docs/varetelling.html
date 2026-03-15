@@ -1468,7 +1468,7 @@ function showProductCard(product, scannedCode) {
                     <input type="number" id="qtyInput" value="${existing ? currentQty : ''}" min="0" placeholder="0" inputmode="numeric">
                     <button class="qty-btn plus" onclick="stepQty(1)">+</button>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${escAttr(product.name)}', '${escAttr(scannedCode)}', ${product.quantity}, '${escAttr(product.variantName || '')}')">
+                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${encodeURIComponent(product.name)}', '${encodeURIComponent(scannedCode)}', ${product.quantity}, '${encodeURIComponent(product.variantName || '')}')">
                     ${existing ? 'Oppdater' : 'Registrer'}
                 </button>
             </div>
@@ -1491,6 +1491,9 @@ function stepQty(delta) {
 }
 
 function registerCount(variantId, productId, name, ean, oldQty, variantName) {
+    name = decodeURIComponent(name);
+    ean = decodeURIComponent(ean);
+    variantName = decodeURIComponent(variantName || '');
     const inp = document.getElementById('qtyInput');
     const newQty = parseInt(inp?.value);
     if (isNaN(newQty) || newQty < 0) {
@@ -1748,10 +1751,6 @@ function escHtml(str) {
     div.textContent = str || '';
     return div.innerHTML;
 }
-function escAttr(str) {
-    return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-}
-
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
     if (debugLog.length > 10) debugLog.shift();  // Behold kun siste 10
