@@ -828,6 +828,7 @@
 let config = { shopName: '', apiKey: '' };
 let productCache = {};      // EAN → { id, variantId, name, ean, sku, quantity, productId }
 let countedItems = [];       // { variantId, productId, name, ean, sku, oldQty, newQty, status }
+try { countedItems = JSON.parse(localStorage.getItem(COUNTED_ITEMS_KEY) || '[]'); } catch(e) { countedItems = []; }
 let html5QrCode = null;
 let isScanning = false;
 let lastScannedCode = '';
@@ -864,6 +865,7 @@ document.addEventListener('click', () => closeMoreMenu());
 // ─── KRYPTO (AES-256-GCM + PBKDF2) ──────────────────
 const STORAGE_KEY = 'ms_enc_v1';
 const PRODUCT_CACHE_KEY = 'ms_product_cache';
+const COUNTED_ITEMS_KEY = 'ms_counted_items';
 const PRODUCT_CACHE_VERSION = 2;  // øk ved format-endringer for å tvinge reload
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 
@@ -1031,6 +1033,8 @@ function goToScanner() {
     document.getElementById('setupScreen').classList.remove('active');
     document.getElementById('scannerScreen').classList.add('active');
     startScanner();
+    updateCountedList();
+    updateBadge();
 }
 
 function logoutAndReset() {
@@ -1040,6 +1044,7 @@ function logoutAndReset() {
         () => {
             localStorage.removeItem(STORAGE_KEY);
             localStorage.removeItem(PRODUCT_CACHE_KEY);
+            localStorage.removeItem(COUNTED_ITEMS_KEY);
             config = { shopName: '', apiKey: '' };
             productCache = {};
             countedItems = [];
@@ -1529,6 +1534,7 @@ function registerCount(variantId, productId, name, ean, oldQty, variantName) {
     document.getElementById('currentProduct').innerHTML = '';
     updateCountedList();
     updateBadge();
+    saveCountedItems();
     showToast(`${name}: ${newQty} stk registrert`, 'success');
     updateScannerStatus('Skann neste vare...');
 }
@@ -1594,6 +1600,7 @@ function deleteAllCounted() {
         `${countedItems.length} vare${countedItems.length === 1 ? '' : 'r'} vil bli fjernet fra tellelisten.`,
         () => {
             countedItems = [];
+            saveCountedItems();
             updateCountedList();
             updateBadge();
         }
@@ -1611,6 +1618,7 @@ function deleteCountedItem(variantId, productId) {
 
     showConfirm(`Slett «${label}»?`, 'Varen fjernes fra tellelisten.', () => {
         countedItems.splice(idx, 1);
+        saveCountedItems();
         updateCountedList();
         updateBadge();
     });
@@ -1731,6 +1739,7 @@ async function saveAllToMyStore() {
 
     bar.style.width = '100%';
     lbl.textContent = `Ferdig! ${done} vare${done === 1 ? '' : 'r'} lagret.`;
+    saveCountedItems();
     await new Promise(r => setTimeout(r, 1200));
     wrap.style.display = 'none';
     saveBtn.disabled = false;
