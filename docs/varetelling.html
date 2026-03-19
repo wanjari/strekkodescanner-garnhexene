@@ -922,6 +922,10 @@ function renderSetupScreen() {
                 style="margin-top:12px; background:transparent; color:var(--text-muted); border:none; font-size:13px;">
                 Bruk andre innstillinger &rarr;
             </button>
+            <button onclick="showDebugLog()"
+                style="margin-top:24px; background:transparent; border:none; color:var(--text-muted); font-size:12px; cursor:pointer; opacity:0.6;">
+                📋 Vis logg
+            </button>
         `;
         setTimeout(() => document.getElementById('pinInput')?.focus(), 100);
     } else {
@@ -1014,7 +1018,9 @@ async function unlockWithPin() {
         goToScanner();
     } catch (err) {
         const isCryptoErr = err.name === 'OperationError';
-        showToast(isCryptoErr ? 'Feil PIN-kode' : ('Feil: ' + err.message), 'error');
+        const msg = isCryptoErr ? 'Feil PIN-kode' : ('Feil: ' + err.message);
+        showToast(msg, 'error');
+        addDebugLog('Innloggingsfeil: ' + err.message);
         btn.innerHTML = 'Lås opp';
         btn.disabled = false;
         if (isCryptoErr) document.getElementById('pinInput').value = '';
@@ -1061,14 +1067,25 @@ async function apiFetch(path, options = {}, _retry = 0) {
         ...(options.headers || {})
     };
 
-    const r = await fetch(url, { ...options, headers });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    let r;
+    try {
+        r = await fetch(url, { ...options, headers, signal: controller.signal });
+    } catch (err) {
+        clearTimeout(timeout);
+        if (err.name === 'AbortError') throw new Error('Tidsavbrudd – ingen svar fra API etter 15s');
+        throw err;
+    }
+    clearTimeout(timeout);
     const text = await r.text();
 
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
-    if (r.status === 429 && _retry < 5) {
-        const wait = (2 ** _retry) * 1000; // 1s, 2s, 4s, 8s, 16s
+    if (r.status === 429 && _retry < 4) {
+        const retryAfter = parseInt(r.headers.get('Retry-After') || '0') * 1000;
+        const wait = retryAfter || (2 ** (_retry + 1)) * 1000; // 2s, 4s, 8s, 16s
         addDebugLog(`429 rate limit – venter ${wait / 1000}s (forsøk ${_retry + 1})`);
         await new Promise(res => setTimeout(res, wait));
         return apiFetch(path, options, _retry + 1);
@@ -1082,8 +1099,8 @@ async function apiFetch(path, options = {}, _retry = 0) {
     return data;
 }
 
-// Hjelpefunksjon: hent alle sider for et endepunkt parallelt
-async function fetchAllPages(path, maxPages = 50) {
+// Hjelpefunksjon: hent alle sider for et endepunkt sekvensielt
+async function fetchAllPages(path, maxPages = 50, onPageProgress = null) {
     const sep = path.includes('?') ? '&' : '?';
     const firstData = await apiFetch(`${path}${sep}page[number]=1`);
     const allItems = [...(firstData.data || [])];
@@ -1093,29 +1110,18 @@ async function fetchAllPages(path, maxPages = 50) {
     if (firstData.links?.last) {
         const m = firstData.links.last.match(/page\[number\]=(\d+)/);
         if (m) lastPage = Math.min(parseInt(m[1]), maxPages);
-    } else if (firstData.links?.next) {
-        // Ingen last-link – fall tilbake til sekvensiell
-        let hasMore = true;
-        let page = 2;
-        while (hasMore && page <= maxPages) {
-            const d = await apiFetch(`${path}${sep}page[number]=${page}`);
-            allItems.push(...(d.data || []));
-            hasMore = !!d.links?.next;
-            page++;
-        }
-        return allItems;
     }
 
-    if (lastPage > 1) {
-        const pagePromises = [];
-        for (let p = 2; p <= lastPage; p++) {
-            pagePromises.push(apiFetch(`${path}${sep}page[number]=${p}`));
-        }
-        const results = await Promise.all(pagePromises);
-        for (const r of results) allItems.push(...(r.data || []));
+    for (let p = 2; p <= lastPage; p++) {
+        await new Promise(res => setTimeout(res, 200)); // pause mellom sider for å unngå 429
+        const d = await apiFetch(`${path}${sep}page[number]=${p}`);
+        allItems.push(...(d.data || []));
+        if (onPageProgress) onPageProgress(p, lastPage);
     }
+
     return allItems;
 }
+
 
 async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     const prog = async (pct, lbl) => {
@@ -1143,15 +1149,18 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     updateScannerStatus('Laster data parallelt...');
     await prog(20, 'Laster produkter og attributter...');
 
-    // Last produkter, opsjonsverdier og produktattributter samtidig
-    const [products, optionValues, productAttrs] = await Promise.all([
-        fetchAllPages('/products?page[size]=250&fields[products]=name,sku,ean'),
-        fetchAllPages('/product-option-values?page[size]=250'),
-        fetchAllPages('/product-attributes?page[size]=250')
-    ]);
+    // Last produkter, opsjonsverdier og produktattributter sekvensielt for å unngå 429
+    await prog(25, 'Laster produkter...');
+    const products = await fetchAllPages('/products?page[size]=250&fields[products]=name,sku,ean');
+    await new Promise(res => setTimeout(res, 300));
+    await prog(35, 'Laster opsjonsverdier...');
+    const optionValues = await fetchAllPages('/product-option-values?page[size]=250');
+    await new Promise(res => setTimeout(res, 300));
+    await prog(45, 'Laster produktattributter...');
+    const productAttrs = await fetchAllPages('/product-attributes?page[size]=250');
+    await new Promise(res => setTimeout(res, 300));
 
-    addDebugLog(`Lastet parallelt: ${products.length} produkter, ${optionValues.length} opsjonsverdier, ${productAttrs.length} produktattributter`);
-    await prog(55, 'Laster varianter...');
+    addDebugLog(`Lastet: ${products.length} produkter, ${optionValues.length} opsjonsverdier, ${productAttrs.length} produktattributter`);
 
     // Bygg produktnavn-kart
     const productNames = {};
@@ -1189,7 +1198,15 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
 
     // Last varianter (avhenger av de tre over)
     updateScannerStatus('Laster varianter...');
-    const variants = await fetchAllPages('/product-variants?page[size]=250');
+    await prog(50, 'Laster varianter (side 1)...');
+    const variants = await fetchAllPages(
+        '/product-variants?page[size]=250',
+        50,
+        async (page, total) => {
+            const pct = 50 + Math.round((page / total) * 28);
+            await prog(pct, `Laster varianter (side ${page}/${total})...`);
+        }
+    );
     addDebugLog(`Lastet ${variants.length} varianter`);
     await prog(80, 'Bygger produktkart...');
     if (variants.length > 0) addDebugLog('Eksempel variant-objekt: ' + JSON.stringify(variants[0]));
