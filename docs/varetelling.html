@@ -306,7 +306,22 @@
             flex: 0 0 auto;
             height: 280px;
             overflow: hidden;
+            cursor: crosshair;
         }
+        .focus-ring {
+            position: absolute;
+            width: 56px;
+            height: 56px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 20;
+            transform: translate(-50%, -50%);
+            opacity: 0;
+            transition: opacity 0.15s;
+            box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+        }
+        .focus-ring.visible { opacity: 1; }
         .scanner-area #reader {
             width: 100%;
             height: 100%;
@@ -772,8 +787,9 @@
         <span class="badge" id="countBadge">0 telt</span>
     </div>
     <div class="scanner-layout">
-        <div class="scanner-area">
+        <div class="scanner-area" id="scannerArea">
             <div id="reader"></div>
+            <div class="focus-ring" id="focusRing"></div>
 
             <div class="scanner-status" id="scannerStatus">Klar til skanning...</div>
         </div>
@@ -1327,6 +1343,40 @@ function startScanner() {
         removeShadedRegion();
         const obs = new MutationObserver(removeShadedRegion);
         obs.observe(readerEl, { childList: true, subtree: true });
+
+        // Trykk-for-fokus
+        const scannerArea = document.getElementById('scannerArea');
+        const focusRing = document.getElementById('focusRing');
+        let focusTimeout;
+        scannerArea.addEventListener('click', async (e) => {
+            const rect = scannerArea.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top)  / rect.height;
+
+            // Vis fokusring
+            focusRing.style.left = (x * 100) + '%';
+            focusRing.style.top  = (y * 100) + '%';
+            focusRing.classList.add('visible');
+            clearTimeout(focusTimeout);
+            focusTimeout = setTimeout(() => focusRing.classList.remove('visible'), 1200);
+
+            // Be kameraet fokusere på punktet
+            try {
+                const video = document.querySelector('#reader video');
+                if (!video) return;
+                const track = video.srcObject?.getVideoTracks?.()[0];
+                if (!track) return;
+                const caps = track.getCapabilities?.();
+                if (caps?.focusMode?.includes('manual') && caps?.pointOfInterest) {
+                    await track.applyConstraints({
+                        advanced: [{ focusMode: 'manual', pointOfInterest: { x, y } }]
+                    });
+                    setTimeout(() => track.applyConstraints({
+                        advanced: [{ focusMode: 'continuous' }]
+                    }).catch(() => {}), 2000);
+                }
+            } catch(e) { /* ikke støttet på denne enheten */ }
+        });
     }).catch(err => {
         console.error('Kamera-feil:', err);
         updateScannerStatus('Kamera ikke tilgjengelig – bruk manuelt felt. Feil: ' + err.message);
