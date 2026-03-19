@@ -828,7 +828,6 @@
 let config = { shopName: '', apiKey: '' };
 let productCache = {};      // EAN → { id, variantId, name, ean, sku, quantity, productId }
 let countedItems = [];       // { variantId, productId, name, ean, sku, oldQty, newQty, status }
-try { countedItems = JSON.parse(localStorage.getItem(COUNTED_ITEMS_KEY) || '[]'); } catch(e) { countedItems = []; }
 let html5QrCode = null;
 let isScanning = false;
 let lastScannedCode = '';
@@ -838,6 +837,10 @@ let debugLog = [];  // For å lagre siste loggmeldinger
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
     if (debugLog.length > 10) debugLog.shift();  // Behold kun siste 10
+}
+
+function saveCountedItems() {
+    try { localStorage.setItem(COUNTED_ITEMS_KEY, JSON.stringify(countedItems)); } catch(e) {}
 }
 
 async function setProgress(pct, label) {
@@ -866,7 +869,10 @@ document.addEventListener('click', () => closeMoreMenu());
 const STORAGE_KEY = 'ms_enc_v1';
 const PRODUCT_CACHE_KEY = 'ms_product_cache';
 const COUNTED_ITEMS_KEY = 'ms_counted_items';
-const PRODUCT_CACHE_VERSION = 2;  // øk ved format-endringer for å tvinge reload
+const PRODUCT_CACHE_VERSION = 2;
+
+// Last telte varer fra forrige sesjon
+try { countedItems = JSON.parse(localStorage.getItem(COUNTED_ITEMS_KEY) || '[]'); } catch(e) { countedItems = []; }  // øk ved format-endringer for å tvinge reload
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 
 async function deriveKey(pin, salt) {
