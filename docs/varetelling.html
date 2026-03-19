@@ -923,8 +923,8 @@ function renderSetupScreen() {
                 Bruk andre innstillinger &rarr;
             </button>
             <button onclick="showDebugLog()"
-                style="margin-top:24px; background:transparent; border:none; color:var(--text-muted); font-size:12px; cursor:pointer; opacity:0.6;">
-                📋 Vis logg
+                style="margin-top:24px; display:block; width:100%; background:none; border:none; border-top:1px solid var(--border); color:var(--text); font-size:15px; text-align:left; padding:14px 18px; cursor:pointer; border-radius:0 0 var(--radius) var(--radius);">
+                🐛 Feilsøkingslogg
             </button>
         `;
         setTimeout(() => document.getElementById('pinInput')?.focus(), 100);
@@ -1113,7 +1113,6 @@ async function fetchAllPages(path, maxPages = 50, onPageProgress = null) {
     }
 
     for (let p = 2; p <= lastPage; p++) {
-        await new Promise(res => setTimeout(res, 200)); // pause mellom sider for å unngå 429
         const d = await apiFetch(`${path}${sep}page[number]=${p}`);
         allItems.push(...(d.data || []));
         if (onPageProgress) onPageProgress(p, lastPage);
@@ -1149,16 +1148,13 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     updateScannerStatus('Laster data parallelt...');
     await prog(20, 'Laster produkter og attributter...');
 
-    // Last produkter, opsjonsverdier og produktattributter sekvensielt for å unngå 429
+    // Last produkter, opsjonsverdier og produktattributter sekvensielt
     await prog(25, 'Laster produkter...');
     const products = await fetchAllPages('/products?page[size]=250&fields[products]=name,sku,ean');
-    await new Promise(res => setTimeout(res, 300));
     await prog(35, 'Laster opsjonsverdier...');
     const optionValues = await fetchAllPages('/product-option-values?page[size]=250');
-    await new Promise(res => setTimeout(res, 300));
     await prog(45, 'Laster produktattributter...');
     const productAttrs = await fetchAllPages('/product-attributes?page[size]=250');
-    await new Promise(res => setTimeout(res, 300));
 
     addDebugLog(`Lastet: ${products.length} produkter, ${optionValues.length} opsjonsverdier, ${productAttrs.length} produktattributter`);
 
