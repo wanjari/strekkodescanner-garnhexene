@@ -304,7 +304,7 @@
             position: relative;
             background: #000;
             flex: 0 0 auto;
-            height: 224px;
+            height: 202px;
             overflow: hidden;
             cursor: crosshair;
         }
@@ -753,7 +753,7 @@
 
         /* Responsive tweaks */
         @media (min-width: 600px) {
-            .scanner-area { height: 272px; }
+            .scanner-area { height: 245px; }
             .content-area { max-width: 560px; margin: 0 auto; }
         }
     </style>
@@ -1612,7 +1612,9 @@ function showProductCard(product, scannedCode) {
             <div class="product-name">${escHtml(product.name)}</div>
             ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
             <div class="product-meta">
-                ${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}
+                ${product.ean ? 'EAN: ' + escHtml(product.ean) + ' · ' : ''}
+                ${product.variantId ? 'Variant: ' + product.variantId + ' · ' : ''}
+                Produkt: ${product.productId}
             </div>
             <div class="stock-row">
                 <span class="stock-label">Nåværende lager:</span>
@@ -1712,7 +1714,7 @@ function updateCountedList() {
                     <div class="item-info">
                         <div class="item-name">${escHtml(productName)}</div>
                         ${variantName ? `<div class="item-variant">${escHtml(variantName)}</div>` : ''}
-                        <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}</div>
+                        <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}${item.variantId ? ' · Variant: ' + item.variantId : ''}</div>
                     </div>
                     <span class="item-qty">${item.newQty}</span>
                 </div>
