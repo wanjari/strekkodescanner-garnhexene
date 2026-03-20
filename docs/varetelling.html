@@ -120,6 +120,7 @@ const SESSION_KEY          = 'ms_session';
 const SESSION_TIMEOUT      = 2 * 60 * 60 * 1000; // 2 timer
 const PRODUCT_CACHE_VERSION = 5;
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
+const APP_UPDATED_FLAG_KEY = 'ms_app_updated_notice';
 const APP_LOADED_AT = Date.now();
 const UPDATE_CHECK_PATHS = ['./varetelling.html', './styles.css', './crypto.js', './sw.js'];
 
@@ -834,6 +835,19 @@ function manualLookup() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const updatedFlag = sessionStorage.getItem(APP_UPDATED_FLAG_KEY);
+        if (updatedFlag) {
+            sessionStorage.removeItem(APP_UPDATED_FLAG_KEY);
+            setTimeout(() => {
+                showToast('Appen er oppdatert til siste versjon', 'success');
+                addDebugLog('Appen ble lastet på nytt etter oppdatering');
+            }, 250);
+        }
+    } catch (e) {
+        addDebugLog('Kunne ikke lese oppdateringsflagg: ' + e.message);
+    }
+
     document.getElementById('manualEan')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') manualLookup();
     });
@@ -1696,6 +1710,12 @@ function showToast(msg, type = '') {
 
 async function hardReloadApp() {
     try {
+        try {
+            sessionStorage.setItem(APP_UPDATED_FLAG_KEY, String(Date.now()));
+        } catch (e) {
+            addDebugLog('Kunne ikke lagre oppdateringsflagg: ' + e.message);
+        }
+
         if ('serviceWorker' in navigator) {
             const regs = await navigator.serviceWorker.getRegistrations();
             await Promise.all(regs.map(r => r.unregister().catch(() => {})));
