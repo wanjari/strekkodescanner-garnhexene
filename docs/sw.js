@@ -1,11 +1,10 @@
 const CACHE = 'varetelling-v21';
 
 self.addEventListener('install', e => {
-    // Cache kun selve HTML-filen ved install
     e.waitUntil(
         caches.open(CACHE).then(cache =>
             cache.addAll(['./varetelling.html', './manifest.json'])
-        ).catch(() => {}) // ikke krasj hvis noe feiler
+        ).catch(() => {})
     );
     self.skipWaiting();
 });
@@ -27,18 +26,18 @@ self.addEventListener('fetch', e => {
         url.includes('fonts.googleapis.com') ||
         url.includes('fonts.gstatic.com') ||
         url.includes('unpkg.com')) {
-        return; // la nettleseren håndtere det
+        return;
     }
 
+    // Network-first: hent alltid fra nett, oppdater cache, fall tilbake til cache hvis offline
     e.respondWith(
-        caches.match(e.request).then(cached => {
-            if (cached) return cached;
-            return fetch(e.request).then(response => {
-                if (!response || response.status !== 200) return response;
-                const clone = response.clone();
-                caches.open(CACHE).then(cache => cache.put(e.request, clone)).catch(() => {});
-                return response;
-            }).catch(() => caches.match('./varetelling.html'));
-        })
+        fetch(e.request).then(response => {
+            if (!response || response.status !== 200) return response;
+            const clone = response.clone();
+            caches.open(CACHE).then(cache => cache.put(e.request, clone)).catch(() => {});
+            return response;
+        }).catch(() =>
+            caches.match(e.request).then(cached => cached || caches.match('./varetelling.html'))
+        )
     );
 });
