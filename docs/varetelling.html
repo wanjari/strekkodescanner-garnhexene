@@ -12,756 +12,8 @@
     <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" as="style" onload="this.rel='stylesheet'">
-    <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
+    <link rel="stylesheet" href="styles.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
-    <style>
-        :root {
-                    /* --- Qty stepper fargede knapper --- */
-                    .qty-stepper {
-                        display: flex;
-                        gap: 4px;
-                        align-items: center;
-                        margin-bottom: 8px;
-                    }
-                    .qty-stepper .qty-btn {
-                        font-size: 16px;
-                        font-family: 'DM Mono', monospace;
-                        font-weight: 600;
-                        border: none;
-                        border-radius: 6px;
-                        padding: 6px 10px;
-                        cursor: pointer;
-                        background: var(--surface-2);
-                        color: var(--text);
-                        transition: background 0.15s;
-                    }
-                    .qty-stepper .qty-btn.minus-multi {
-                        background: #e17055;
-                        color: #fff;
-                    }
-                    .qty-stepper .qty-btn.plus-multi {
-                        background: #00b894;
-                        color: #fff;
-                    }
-                    .qty-stepper .qty-btn.minus {
-                        background: #636e72;
-                        color: #fff;
-                    }
-                    .qty-stepper .qty-btn.plus {
-                        background: #636e72;
-                        color: #fff;
-                    }
-                    .qty-stepper .qty-btn:active {
-                        filter: brightness(0.9);
-                    }
-            --bg: #0f1117;
-            --surface: #1a1d27;
-            --surface-2: #242836;
-            --border: #2e3347;
-            --text: #e8eaed;
-            --text-muted: #8b8fa3;
-            --accent: #6c5ce7;
-            --accent-light: #a29bfe;
-            --success: #00b894;
-            --success-bg: rgba(0, 184, 148, 0.12);
-            --warning: #fdcb6e;
-            --warning-bg: rgba(253, 203, 110, 0.12);
-            --danger: #e17055;
-            --danger-bg: rgba(225, 112, 85, 0.12);
-            --radius: 12px;
-            --radius-sm: 8px;
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: 'DM Sans', sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100dvh;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        /* Header */
-        .header {
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            padding: 16px 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        .header h1 {
-            font-size: 18px;
-            font-weight: 600;
-            letter-spacing: -0.3px;
-        }
-        .header h1 span {
-            color: var(--accent-light);
-            font-family: 'DM Mono', monospace;
-            font-weight: 500;
-            font-size: 14px;
-            margin-left: 8px;
-        }
-                .qty-stepper-multi {
-                    display: flex;
-                    gap: 10px;
-                    margin-bottom: 12px;
-                }
-                .qty-stepper {
-                    display: flex;
-                    gap: 10px;
-                    margin-bottom: 12px;
-                }
-                .qty-input-row {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: flex-start;
-                }
-                .qty-input-row label {
-                    margin-bottom: 6px;
-                    font-size: 1.1em;
-                }
-                .qty-stepper-multi button,
-                .qty-stepper button {
-                    min-width: 56px;
-                    min-height: 48px;
-                    font-size: 1.5em;
-                    border-radius: 10px;
-                    font-weight: 700;
-                    border: none;
-                    cursor: pointer;
-                    transition: background 0.15s, color 0.15s;
-                    box-shadow: 0 2px 8px #0002;
-                }
-                .qty-stepper-multi .qty-btn.minus-multi {
-                    background: #2d2f3a;
-                    color: #ff6b6b;
-                }
-                .qty-stepper-multi .qty-btn.plus-multi {
-                    background: #2d2f3a;
-                    color: #6bffb0;
-                }
-                .qty-stepper .qty-btn.minus {
-                    background: #3a2230;
-                    color: #ff6b6b;
-                }
-                .qty-stepper .qty-btn.plus {
-                    background: #223a2d;
-                    color: #6bffb0;
-                }
-                .qty-stepper-multi .qty-btn.minus-multi:hover,
-                .qty-stepper .qty-btn.minus:hover {
-                    background: #ff6b6b;
-                    color: #fff;
-                }
-                .qty-stepper-multi .qty-btn.plus-multi:hover,
-                .qty-stepper .qty-btn.plus:hover {
-                    background: #6bffb0;
-                    color: #222;
-                }
-                .qty-stepper input[type="number"] {
-                    width: 70px;
-                    height: 48px;
-                    font-size: 1.3em;
-                    text-align: center;
-                    border-radius: 10px;
-                    border: 1px solid #333;
-                    background: #23242a;
-                    color: #f3f3f3;
-                }
-                .qty-input-row > button.btn {
-                    margin-top: 4px;
-                    font-size: 1.1em;
-                    padding: 10px 24px;
-                }
-        .badge {
-            background: var(--accent);
-            color: white;
-            font-size: 12px;
-            font-weight: 600;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-family: 'DM Mono', monospace;
-        }
-
-        /* Setup screen */
-        .screen { display: none; }
-        .screen.active { display: block; }
-
-        .setup-container {
-            max-width: 440px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }
-        .setup-container h2 {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            letter-spacing: -0.5px;
-        }
-        .setup-container p {
-            color: var(--text-muted);
-            font-size: 14px;
-            line-height: 1.5;
-            margin-bottom: 32px;
-        }
-
-        .field {
-            margin-bottom: 20px;
-        }
-        .field label {
-            display: block;
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-        }
-        .field input, .field select {
-            width: 100%;
-            padding: 14px 16px;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            color: var(--text);
-            font-family: 'DM Mono', monospace;
-            font-size: 15px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        .field input:focus, .field select:focus {
-            border-color: var(--accent);
-        }
-        .field input::placeholder {
-            color: var(--text-muted);
-            opacity: 0.5;
-        }
-        .field .hint {
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-top: 6px;
-        }
-
-        .btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            width: 100%;
-            padding: 16px;
-            border: none;
-            border-radius: var(--radius);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .btn-primary {
-            background: var(--accent);
-            color: white;
-        }
-        .btn-primary:hover { background: #5b4bd6; }
-        .btn-primary:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-        .btn-secondary {
-            background: var(--surface-2);
-            color: var(--text);
-            border: 1px solid var(--border);
-        }
-        .btn-secondary:hover { background: var(--border); }
-        .btn-success {
-            background: var(--success);
-            color: white;
-        }
-        .btn-success:hover { background: #00a382; }
-        .btn-danger {
-            background: transparent;
-            color: var(--danger);
-            border: 1px solid var(--danger);
-        }
-        .btn-sm {
-            padding: 10px 16px;
-            font-size: 13px;
-            width: auto;
-        }
-
-        /* Scanner screen */
-        .scanner-layout {
-            display: flex;
-            flex-direction: column;
-            height: calc(100dvh - 57px);
-        }
-        .scanner-area {
-            position: relative;
-            background: #000;
-            flex: 0 0 auto;
-            height: 202px;
-            width: 100%;
-            overflow: hidden;
-            cursor: crosshair;
-            transition: height 0.25s ease;
-        }
-        .scanner-area.collapsed {
-            height: 0 !important;
-        }
-        .focus-ring {
-            position: absolute;
-            width: 56px;
-            height: 56px;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            pointer-events: none;
-            z-index: 20;
-            transform: translate(-50%, -50%);
-            opacity: 0;
-            transition: opacity 0.15s;
-            box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
-        }
-        .focus-ring.visible { opacity: 1; }
-        .scanner-area #reader {
-            width: 100%;
-            height: 100%;
-        }
-        .scanner-area #reader video {
-            object-fit: cover !important;
-        }
-        /* Hide the html5-qrcode default UI chrome */
-        #reader__dashboard { display: none !important; }
-        #reader__scan_region { height: 100% !important; }
-        #reader__scan_region img { display: none !important; }
-
-        .scanner-overlay {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none;
-            z-index: 10;
-        }
-
-
-
-        .scanner-status {
-            position: absolute;
-            bottom: 16px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(8px);
-            color: white;
-            font-size: 13px;
-            padding: 8px 16px;
-            border-radius: 20px;
-            z-index: 10;
-            white-space: nowrap;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        /* Content below scanner */
-        .content-area {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            padding-bottom: 100px;
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        /* Manual entry */
-        .manual-entry {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 20px;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .manual-entry input {
-            flex: 1;
-            padding: 12px 14px;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            color: var(--text);
-            font-family: 'DM Mono', monospace;
-            font-size: 14px;
-            outline: none;
-        }
-        .manual-entry input:focus { border-color: var(--accent); }
-
-        /* Product card */
-        .product-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 20px;
-            margin-bottom: 16px;
-            animation: slideUp 0.3s ease;
-        }
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(12px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .product-card .product-name {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 2px;
-        }
-        .product-card .already-counted-banner {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(250, 177, 60, 0.15);
-            border: 1px solid rgba(250, 177, 60, 0.45);
-            color: #fab13c;
-            border-radius: 8px;
-            padding: 10px 14px;
-            font-size: 13px;
-            font-weight: 500;
-            margin-bottom: 14px;
-        }
-        .product-card .product-variant-name {
-            font-size: 13px;
-            color: var(--accent-light);
-            font-weight: 500;
-            margin-bottom: 4px;
-        }
-        .product-card .product-meta {
-            font-size: 13px;
-            color: var(--text-muted);
-            font-family: 'DM Mono', monospace;
-            margin-bottom: 16px;
-        }
-        .product-card .stock-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        .stock-label {
-            font-size: 13px;
-            color: var(--text-muted);
-            min-width: 90px;
-        }
-        .stock-value {
-            font-family: 'DM Mono', monospace;
-            font-size: 15px;
-            font-weight: 500;
-        }
-
-        .qty-input-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid var(--border);
-        }
-        .qty-input-row label {
-            font-size: 14px;
-            font-weight: 600;
-            white-space: nowrap;
-        }
-        .qty-stepper {
-            display: flex;
-            align-items: center;
-            gap: 0;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            overflow: hidden;
-        }
-        .qty-stepper button {
-            width: 44px;
-            height: 44px;
-            border: none;
-            background: transparent;
-            color: var(--text);
-            font-size: 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.15s;
-        }
-        .qty-stepper button:hover { background: var(--border); }
-        .qty-stepper input {
-            width: 64px;
-            height: 44px;
-            border: none;
-            border-left: 1px solid var(--border);
-            border-right: 1px solid var(--border);
-            background: transparent;
-            color: var(--text);
-            font-family: 'DM Mono', monospace;
-            font-size: 16px;
-            font-weight: 600;
-            text-align: center;
-            outline: none;
-            -moz-appearance: textfield;
-        }
-        .qty-stepper input::-webkit-inner-spin-button,
-        .qty-stepper input::-webkit-outer-spin-button {
-            -webkit-appearance: none;
-        }
-        .qty-input-row .btn {
-            width: auto;
-            flex-shrink: 0;
-        }
-
-        /* Counted list */
-        .section-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 12px;
-            margin-top: 24px;
-        }
-        .counted-item {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            padding: 14px 16px;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            margin-bottom: 10px;
-        }
-        .counted-item .item-top {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 8px;
-        }
-        .counted-item .item-info {
-            flex: 1;
-            min-width: 0;
-        }
-        .counted-item .item-name {
-            font-size: 15px;
-            font-weight: 600;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: var(--text);
-        }
-        .counted-item .item-variant {
-            font-size: 12px;
-            color: var(--accent-light);
-            font-weight: 500;
-            margin-top: 2px;
-        }
-        .counted-item .item-ean {
-            font-size: 11px;
-            color: var(--text-muted);
-            font-family: 'DM Mono', monospace;
-            margin-top: 2px;
-        }
-        .counted-item .item-bottom {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 2px;
-        }
-        .counted-item .item-qty-change {
-            font-family: 'DM Mono', monospace;
-            font-size: 13px;
-            color: var(--text-muted);
-        }
-        .counted-item .item-qty {
-            font-family: 'DM Mono', monospace;
-            font-size: 22px;
-            font-weight: 700;
-            color: var(--success);
-            flex-shrink: 0;
-        }
-        .counted-item .item-status {
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            flex-shrink: 0;
-        }
-        .counted-item .item-edit-btn {
-            margin-left: auto;
-            font-size: 12px;
-            padding: 5px 14px;
-            border-radius: 6px;
-            background: var(--surface-2);
-            color: var(--text-muted);
-            border: 1px solid var(--border);
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-        }
-        .counted-item .item-edit-btn:hover {
-            background: var(--accent);
-            color: #fff;
-            border-color: var(--accent);
-        }
-        .counted-item .item-delete-btn {
-            font-size: 12px;
-            padding: 5px 14px;
-            border-radius: 6px;
-            background: transparent;
-            color: var(--danger);
-            border: 1px solid var(--danger);
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-        }
-        .counted-item .item-delete-btn:hover {
-            background: var(--danger);
-            color: #fff;
-        }
-        .status-saved {
-            background: var(--success-bg);
-            color: var(--success);
-        }
-        .status-pending {
-            background: var(--warning-bg);
-            color: var(--warning);
-        }
-        .status-error {
-            background: var(--danger-bg);
-            color: var(--danger);
-        }
-
-        /* Bottom bar */
-        .bottom-bar {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: var(--surface);
-            border-top: 1px solid var(--border);
-            padding: 12px 20px;
-            padding-bottom: max(12px, env(safe-area-inset-bottom));
-            display: flex;
-            gap: 8px;
-            z-index: 100;
-        }
-        .bottom-bar .btn { flex: 1; }
-
-        /* More-menu dropdown */
-        .more-menu { position: relative; flex: 0 0 auto; }
-        .more-trigger { width: auto; padding: 16px; font-size: 20px; line-height: 1; }
-        .more-dropdown {
-            display: none;
-            position: absolute;
-            bottom: calc(100% + 8px);
-            right: 0;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            box-shadow: 0 4px 24px rgba(0,0,0,.35);
-            min-width: 220px;
-            z-index: 200;
-            overflow: hidden;
-        }
-        .more-dropdown.open { display: block; }
-        .more-dropdown button {
-            display: block;
-            width: 100%;
-            background: none;
-            border: none;
-            color: var(--text);
-            font-size: 15px;
-            text-align: left;
-            padding: 14px 18px;
-            cursor: pointer;
-        }
-        .more-dropdown button:hover { background: var(--border); }
-        .more-dropdown button + button { border-top: 1px solid var(--border); }
-
-        /* Progress bar */
-        .load-progress { margin-top: 20px; display: none; }
-        .load-progress.visible { display: block; }
-        .load-progress-label { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; text-align: center; }
-        .load-progress-track {
-            width: 100%; height: 6px;
-            background: var(--border);
-            border-radius: 99px;
-            overflow: hidden;
-        }
-        .load-progress-bar {
-            height: 100%;
-            width: 0%;
-            background: var(--success);
-            border-radius: 99px;
-            transition: width 0.35s ease;
-        }
-
-        /* Toast */
-        .toast {
-            position: fixed;
-            top: 72px;
-            left: 50%;
-            transform: translateX(-50%) translateY(-20px);
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 12px 20px;
-            border-radius: var(--radius);
-            font-size: 14px;
-            font-weight: 500;
-            z-index: 999;
-            opacity: 0;
-            transition: all 0.3s ease;
-            pointer-events: none;
-            white-space: nowrap;
-        }
-        .toast.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
-        }
-        .toast.success { border-color: var(--success); }
-        .toast.error { border-color: var(--danger); }
-
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-muted);
-        }
-        .empty-state .icon {
-            font-size: 40px;
-            margin-bottom: 12px;
-            opacity: 0.4;
-        }
-        .empty-state p { font-size: 14px; }
-
-        /* Loading spinner */
-        .spinner {
-            width: 18px;
-            height: 18px;
-            border: 2px solid rgba(255,255,255,0.2);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-            display: inline-block;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Responsive tweaks */
-        @media (min-width: 600px) {
-            .scanner-area { height: 245px; }
-            .content-area { max-width: 560px; margin: 0 auto; }
-        }
-    </style>
 </head>
 <body>
 
@@ -787,8 +39,9 @@
 
 <!-- SCANNER SCREEN -->
 <div class="screen" id="scannerScreen">
+    <div class="mode-banner">📦 VAREPÅFYLL-MODUS</div>
     <div class="header">
-        <h1>Varetelling <span>Garnhexene</span></h1>
+        <h1 id="screenTitle">Varetelling <span>Garnhexene</span></h1>
     </div>
     <div class="scanner-layout">
         <div class="scanner-area" id="scannerArea">
@@ -810,6 +63,9 @@
 
             <!-- Counted items -->
             <div id="countedSection"></div>
+
+            <!-- Restock items -->
+            <div id="restockSection"></div>
         </div>
 
         <div id="saveProgressWrap" style="display:none; position:fixed; bottom:80px; left:0; right:0; z-index:101; padding:6px 20px; background:#1e1e2e; border-top:1px solid #333;">
@@ -820,17 +76,26 @@
         </div>
 
         <div class="bottom-bar">
-            <button class="btn btn-success" id="saveBtn" onclick="saveAllToMyStore()">
+            <button class="btn btn-success" id="saveBtn" onclick="saveAll()">
                 Lagre alle
             </button>
             <div class="more-menu" id="moreMenu">
-                <button class="btn btn-secondary more-trigger" onclick="toggleMoreMenu(event)" style="flex: 0 0 auto; width: auto; padding: 16px; font-size: 20px; line-height:1;">
+                <button class="btn btn-secondary more-trigger" id="moreTrigger" onclick="toggleMoreMenu(event)" style="flex: 0 0 auto; width: auto; padding: 16px; font-size: 20px; line-height:1;">
                     ⋮
+                    <span class="more-trigger-badge" id="moreTriggerBadge" aria-hidden="true">1</span>
                 </button>
                 <div class="more-dropdown" id="moreDropdown">
-                    <button onclick="exportCSV(); closeMoreMenu()">📥 Eksporter CSV</button>
+                    <button onclick="switchMode('count'); closeMoreMenu()">🔢 Varetelling
+                        <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tell antall på lager</span>
+                    </button>
+                    <button onclick="switchMode('restock'); closeMoreMenu()">📦 Varepåfyll
+                        <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Legg til antall på eksisterende lager</span>
+                    </button>
                     <button onclick="refreshProductCache()">🔄 Oppdater produktliste
                         <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tving ny nedlasting fra MyStore</span>
+                    </button>
+                    <button id="appRefreshBtn" onclick="hardReloadApp(); closeMoreMenu()">🔄 Oppdater appen
+                        <span id="appRefreshHint" style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tøm cache og hent siste versjon. Beholder API-nøkkel og innstillinger</span>
                     </button>
                     <button onclick="showDebugLog(); closeMoreMenu()">🐛 Feilsøkingslogg</button>
                     <button onclick="logoutAndReset(); closeMoreMenu()">
@@ -841,28 +106,37 @@
             </div>
         </div>
     </div>
-</div>
+ </div>
 
+<script src="crypto.js"></script>
 <script>
 // ─── KONSTANTER ──────────────────────────────────────
 const STORAGE_KEY          = 'ms_enc_v1';
 const PRODUCT_CACHE_KEY    = 'ms_product_cache';
 const COUNTED_ITEMS_KEY    = 'ms_counted_items';
+const RESTOCK_ITEMS_KEY    = 'ms_restock_items';
 const SESSION_KEY          = 'ms_session';
 const SESSION_TIMEOUT      = 2 * 60 * 60 * 1000; // 2 timer
 const PRODUCT_CACHE_VERSION = 5;
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
+const APP_LOADED_AT = Date.now();
+const UPDATE_CHECK_PATHS = ['./varetelling.html', './styles.css', './crypto.js', './sw.js'];
 
 // ─── STATE ───────────────────────────────────────────
 let config = { shopName: '', apiKey: '' };
 let productCache = {};      // EAN → { id, variantId, name, ean, sku, quantity, productId }
 let countedItems = [];       // { variantId, productId, name, ean, sku, oldQty, newQty, status }
 try { countedItems = JSON.parse(localStorage.getItem(COUNTED_ITEMS_KEY) || '[]'); } catch(e) { countedItems = []; }
+let restockItems = [];       // { variantId, productId, name, variantName, ean, oldQty, addQty, status }
+try { restockItems = JSON.parse(localStorage.getItem(RESTOCK_ITEMS_KEY) || '[]'); } catch(e) { restockItems = []; }
+let appMode = 'count';       // 'count' | 'restock'
 let html5QrCode = null;
 let isScanning = false;
 let lastScannedCode = '';
 let lastScanTime = 0;
 let debugLog = [];  // For å lagre siste loggmeldinger
+let updateAvailable = false;
+let updateToastShown = false;
 
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
@@ -871,6 +145,10 @@ function addDebugLog(message) {
 
 function saveCountedItems() {
     try { localStorage.setItem(COUNTED_ITEMS_KEY, JSON.stringify(countedItems)); } catch(e) {}
+}
+
+function saveRestockItems() {
+    try { localStorage.setItem(RESTOCK_ITEMS_KEY, JSON.stringify(restockItems)); } catch(e) {}
 }
 
 function saveSession() {
@@ -926,38 +204,75 @@ function closeMoreMenu() {
 }
 document.addEventListener('click', () => closeMoreMenu());
 
-// ─── KRYPTO (AES-256-GCM + PBKDF2) ──────────────────
-async function deriveKey(pin, salt) {
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveKey']
-    );
-    return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt, iterations: 200000, hash: 'SHA-256' },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false, ['encrypt', 'decrypt']
-    );
+function setUpdateAvailableState(isAvailable) {
+    updateAvailable = isAvailable;
+    const btn = document.getElementById('appRefreshBtn');
+    const hint = document.getElementById('appRefreshHint');
+    const moreTrigger = document.getElementById('moreTrigger');
+    const moreTriggerBadge = document.getElementById('moreTriggerBadge');
+    if (!btn || !hint) return;
+
+    if (isAvailable) {
+        btn.childNodes[0].textContent = '🔄 Oppdater appen';
+        hint.textContent = 'Ny versjon tilgjengelig. Tøm cache og hent siste versjon. Beholder API-nøkkel og innstillinger';
+        moreTrigger?.classList.add('has-update');
+        moreTriggerBadge?.classList.add('visible');
+        if (!updateToastShown) {
+            updateToastShown = true;
+            showToast('Ny versjon av appen er tilgjengelig. Åpne menyen og velg «Oppdater appen».', 'success');
+        }
+    } else {
+        btn.childNodes[0].textContent = '🔄 Oppdater appen';
+        hint.textContent = 'Tøm cache og hent siste versjon. Beholder API-nøkkel og innstillinger';
+        moreTrigger?.classList.remove('has-update');
+        moreTriggerBadge?.classList.remove('visible');
+    }
 }
 
-async function encryptCredentials(shopName, apiKey, pin) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const iv   = crypto.getRandomValues(new Uint8Array(12));
-    const key  = await deriveKey(pin, salt);
-    const data = new TextEncoder().encode(JSON.stringify({ shopName, apiKey }));
-    const enc  = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-    const combined = new Uint8Array(16 + 12 + enc.byteLength);
-    combined.set(salt, 0); combined.set(iv, 16); combined.set(new Uint8Array(enc), 28);
-    return btoa(String.fromCharCode(...combined));
+async function checkForAppUpdate() {
+    if (updateAvailable) return true;
+
+    for (const path of UPDATE_CHECK_PATHS) {
+        try {
+            const sep = path.includes('?') ? '&' : '?';
+            const response = await fetch(`${path}${sep}update_check=${Date.now()}`, {
+                method: 'HEAD',
+                cache: 'no-store'
+            });
+            if (!response.ok) continue;
+
+            const lastModified = response.headers.get('Last-Modified');
+            if (!lastModified) continue;
+
+            const modifiedAt = Date.parse(lastModified);
+            if (!Number.isNaN(modifiedAt) && modifiedAt > (APP_LOADED_AT + 1000)) {
+                setUpdateAvailableState(true);
+                addDebugLog(`Oppdatering oppdaget i ${path}`);
+                return true;
+            }
+        } catch (e) {
+            addDebugLog(`Oppdateringssjekk feilet for ${path}: ${e.message}`);
+        }
+    }
+
+    return false;
 }
 
-async function decryptCredentials(stored, pin) {
-    const combined = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
-    const salt = combined.slice(0, 16);
-    const iv   = combined.slice(16, 28);
-    const ct   = combined.slice(28);
-    const key  = await deriveKey(pin, salt);
-    const dec  = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
-    return JSON.parse(new TextDecoder().decode(dec));
+function switchMode(mode) {
+    appMode = mode;
+    const isRestock = mode === 'restock';
+    document.body.classList.toggle('restock-mode', isRestock);
+    const title = document.getElementById('screenTitle');
+    if (title) title.innerHTML = isRestock
+        ? 'Varepåfyll <span>Garnhexene</span>'
+        : 'Varetelling <span>Garnhexene</span>';
+    // Skjul feil seksjon
+    document.getElementById('countedSection').style.display  = isRestock ? 'none' : '';
+    document.getElementById('restockSection').style.display  = isRestock ? '' : 'none';
+    // Lukk eventuelle åpne produktkort
+    document.getElementById('currentProduct').innerHTML = '';
+    restoreScannerArea();
+    showToast(isRestock ? '📦 Varepåfyll-modus aktivert' : '🔢 Varetelling-modus aktivert', 'success');
 }
 
 // ─── SETUP ───────────────────────────────────────────
@@ -1094,6 +409,9 @@ function goToScanner() {
     document.getElementById('scannerScreen').classList.add('active');
     startScanner();
     updateCountedList();
+    updateRestockList();
+    // Start alltid i varetelling-modus
+    document.getElementById('restockSection').style.display = 'none';
     updateBadge();
 }
 
@@ -1105,10 +423,12 @@ function logoutAndReset() {
             localStorage.removeItem(STORAGE_KEY);
             localStorage.removeItem(PRODUCT_CACHE_KEY);
             localStorage.removeItem(COUNTED_ITEMS_KEY);
+            localStorage.removeItem(RESTOCK_ITEMS_KEY);
             clearSession();
             config = { shopName: '', apiKey: '' };
             productCache = {};
             countedItems = [];
+            restockItems = [];
             if (isScanning && html5QrCode) {
                 html5QrCode.stop().catch(() => {});
                 isScanning = false;
@@ -1503,11 +823,41 @@ document.addEventListener('DOMContentLoaded', async () => {
                 touchSession();
             }
         }
+
+        if (document.visibilityState === 'visible') {
+            checkForAppUpdate();
+        }
     });
 
+    window.addEventListener('pageshow', () => {
+        checkForAppUpdate();
+    });
+
+    setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            checkForAppUpdate();
+        }
+    }, 60000);
+
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
+        navigator.serviceWorker.register('./sw.js').then(registration => {
+            if (registration.waiting) setUpdateAvailableState(true);
+
+            registration.addEventListener('updatefound', () => {
+                const worker = registration.installing;
+                if (!worker) return;
+                worker.addEventListener('statechange', () => {
+                    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                        setUpdateAvailableState(true);
+                    }
+                });
+            });
+
+            setTimeout(() => registration.update().catch(() => {}), 1500);
+        }).catch(() => {});
     }
+
+    checkForAppUpdate();
 });
 
 async function lookupProduct(code) {
@@ -1650,21 +1000,58 @@ function showProductCard(product, scannedCode) {
         addDebugLog(`Mangler variantnavn: variantId=${product.variantId}, ean=${product.ean}, produktnavn=${product.name}`);
     }
     const itemId = product.variantId || product.productId;
-    const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
-    const currentQty = existing ? existing.newQty : product.quantity;
 
-    const html = `
+    let html;
+    if (appMode === 'restock') {
+        // ── VAREPÅFYLL-KORT ──
+        const existingR = restockItems.find(i => (i.variantId || i.productId) === itemId);
+        const prevAdd   = existingR ? existingR.addQty : 0;
+        const minAdd    = -Math.max(0, product.quantity);
+        html = `
         <div class="product-card" style="position:relative;">
             <button onclick="document.getElementById('currentProduct').innerHTML=''; restoreScannerArea();" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
-            ${existing ? `
-            <div class="already-counted-banner">
-                ⚠️ Allerede telt – tidligere antall: <strong>${existing.newQty}</strong>
-            </div>` : ''}
+            ${existingR ? `<div class="already-counted-banner">⚠️ Allerede justert med ${existingR.addQty > 0 ? '+' : ''}${existingR.addQty} stk tidligere</div>` : ''}
             <div class="product-name">${escHtml(product.name)}</div>
             ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
-            <div class="product-meta">
-                ${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}
+            <div class="product-meta">${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}</div>
+            <div class="stock-row">
+                <span class="stock-label">Nåværende lager:</span>
+                <span class="stock-value">${product.quantity}</span>
             </div>
+            <div class="qty-input-row">
+                <div class="qty-stepper-multi restock-btns">
+                    <button class="qty-btn minus-multi" onclick="stepRestockQty(-20)">−20</button>
+                    <button class="qty-btn minus-multi" onclick="stepRestockQty(-10)">−10</button>
+                    <button class="qty-btn plus-multi" onclick="stepRestockQty(10)">+10</button>
+                    <button class="qty-btn plus-multi" onclick="stepRestockQty(20)">+20</button>
+                </div>
+                <div class="restock-calc">
+                    Legger til: <strong id="restockAdd">0</strong> &nbsp;→&nbsp;
+                    Ny total: <span class="restock-sum" id="restockTotal">${product.quantity}</span>
+                </div>
+                <div class="qty-stepper">
+                    <button class="qty-btn minus" onclick="stepRestockQty(-1)">−</button>
+                    <input type="number" id="qtyInput" value="${prevAdd !== 0 ? prevAdd : ''}" min="${minAdd}" placeholder="0" inputmode="numeric"
+                        oninput="updateRestockCalc(${product.quantity})">
+                    <button class="qty-btn plus" onclick="stepRestockQty(1)">+</button>
+                </div>
+                    <button class="btn btn-primary btn-sm" style="background:var(--restock);"
+                    onclick="registerRestock('${product.variantId || ''}', '${product.productId}', '${encodeURIComponent(product.name)}', '${encodeURIComponent(scannedCode)}', ${product.quantity}, '${encodeURIComponent(product.variantName || '')}')">
+                    ${existingR ? 'Oppdater påfyll' : 'Legg til beholdning'}
+                </button>
+            </div>
+        </div>`;
+    } else {
+        // ── VARETELLING-KORT ──
+        const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
+        const currentQty = existing ? existing.newQty : product.quantity;
+        html = `
+        <div class="product-card" style="position:relative;">
+            <button onclick="document.getElementById('currentProduct').innerHTML=''; restoreScannerArea();" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
+            ${existing ? `<div class="already-counted-banner">⚠️ Allerede telt – tidligere antall: <strong>${existing.newQty}</strong></div>` : ''}
+            <div class="product-name">${escHtml(product.name)}</div>
+            ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
+            <div class="product-meta">${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}</div>
             <div class="stock-row">
                 <span class="stock-label">Nåværende lager:</span>
                 <span class="stock-value">${product.quantity}</span>
@@ -1685,13 +1072,17 @@ function showProductCard(product, scannedCode) {
                     ${existing ? 'Oppdater' : 'Registrer'}
                 </button>
             </div>
-        </div>
-    `;
+        </div>`;
+    }
+
     document.getElementById('currentProduct').innerHTML = html;
 
     setTimeout(() => {
         const inp = document.getElementById('qtyInput');
-        if (inp) inp.focus();
+        if (inp) {
+            inp.focus();
+            if (appMode === 'restock') updateRestockCalc(product.quantity);
+        }
     }, 100);
 }
 
@@ -1701,6 +1092,153 @@ function stepQty(delta) {
     let val = parseInt(inp.value) || 0;
     val = Math.max(0, val + delta);
     inp.value = val;
+}
+
+function stepRestockQty(delta) {
+    const inp = document.getElementById('qtyInput');
+    const totalEl = document.getElementById('restockTotal');
+    if (!inp || !totalEl) return;
+    const oldQty = parseInt(totalEl.dataset.old || totalEl.textContent) || 0;
+    let addQty = parseInt(inp.value) || 0;
+    addQty = Math.max(-oldQty, addQty + delta);
+    inp.value = addQty;
+    updateRestockCalc(oldQty);
+}
+
+function updateRestockCalc(oldQty) {
+    const inp     = document.getElementById('qtyInput');
+    const addEl   = document.getElementById('restockAdd');
+    const totalEl = document.getElementById('restockTotal');
+    if (!inp || !addEl || !totalEl) return;
+    const addQty = Math.max(-oldQty, parseInt(inp.value) || 0);
+    inp.value = addQty;
+    addEl.textContent   = `${addQty > 0 ? '+' : ''}${addQty}`;
+    totalEl.textContent = oldQty + addQty;
+    totalEl.dataset.old = oldQty;
+}
+
+function registerRestock(variantId, productId, name, ean, oldQty, variantName) {
+    name = decodeURIComponent(name);
+    ean  = decodeURIComponent(ean);
+    variantName = decodeURIComponent(variantName || '');
+    const inp    = document.getElementById('qtyInput');
+    const addQty = parseInt(inp?.value);
+    if (isNaN(addQty) || addQty === 0) {
+        showToast('Legg inn et positivt eller negativt antall', 'error');
+        return;
+    }
+    if (oldQty + addQty < 0) {
+        showToast('Kan ikke redusere under 0 på lager', 'error');
+        return;
+    }
+
+    const itemId   = variantId || productId;
+    const existing = restockItems.find(i => (i.variantId || i.productId) === itemId);
+    if (existing) {
+        existing.addQty = addQty;
+        existing.status = 'pending';
+        if (variantName) existing.variantName = variantName;
+    } else {
+        restockItems.push({ variantId, productId, name, variantName: variantName || '', ean, oldQty, addQty, status: 'pending' });
+    }
+
+    document.getElementById('currentProduct').innerHTML = '';
+    restoreScannerArea();
+    updateRestockList();
+    saveRestockItems();
+    touchSession();
+    showToast(`${name}: ${addQty > 0 ? '+' : ''}${addQty} stk registrert`, 'success');
+    updateScannerStatus('Skann neste vare...');
+}
+
+function updateRestockList() {
+    const el = document.getElementById('restockSection');
+    if (!el) return;
+    if (restockItems.length === 0) { el.innerHTML = ''; return; }
+
+    let html = `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <div class="section-title" style="margin-bottom:0;">Varepåfyll (${restockItems.length})</div>
+            <button onclick="deleteAllRestock()" style="font-size:12px; padding:5px 14px; border-radius:6px; background:transparent; color:var(--danger); border:1px solid var(--danger); font-weight:500; cursor:pointer;">Slett alle</button>
+        </div>`;
+
+    for (let i = restockItems.length - 1; i >= 0; i--) {
+        const item = restockItems[i];
+        const newQty = item.oldQty + item.addQty;
+        const addQtyLabel = `${item.addQty > 0 ? '+' : ''}${item.addQty}`;
+        const addQtyColor = item.addQty >= 0 ? 'var(--restock)' : 'var(--danger)';
+        const statusClass = item.status === 'saved' ? 'status-saved' : item.status === 'error' ? 'status-error' : 'status-pending';
+        const statusText  = item.status === 'saved' ? 'Lagret' : item.status === 'error' ? 'Feil' : 'Venter';
+        html += `
+            <div class="counted-item">
+                <div class="item-top">
+                    <div class="item-info">
+                        <div class="item-name">${escHtml(item.name || '')}</div>
+                        ${item.variantName ? `<div class="item-variant">${escHtml(item.variantName)}</div>` : ''}
+                        <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}</div>
+                    </div>
+                    <span class="item-qty" style="color:${addQtyColor};">${addQtyLabel}</span>
+                </div>
+                <div class="item-bottom">
+                    <span class="item-qty-change">${item.oldQty} ${item.addQty >= 0 ? '+' : '−'} ${Math.abs(item.addQty)} = <strong>${newQty}</strong></span>
+                    <span class="item-status ${statusClass}">${statusText}</span>
+                    <button class="item-edit-btn" onclick="editRestockItem('${item.variantId || ''}', '${item.productId}')">Endre</button>
+                    <button class="item-delete-btn" onclick="deleteRestockItem('${item.variantId || ''}', '${item.productId}')">Slett</button>
+                </div>
+            </div>`;
+    }
+    el.innerHTML = html;
+}
+
+function deleteAllRestock() {
+    if (restockItems.length === 0) return;
+    showConfirm('Slett alle påfyll?', `${restockItems.length} oppføringer vil bli fjernet.`, () => {
+        restockItems = [];
+        saveRestockItems();
+        updateRestockList();
+    });
+}
+
+function deleteRestockItem(variantId, productId) {
+    const idx = restockItems.findIndex(i =>
+        (i.variantId === variantId || (!i.variantId && variantId === '')) && i.productId === productId);
+    if (idx === -1) return;
+    const item  = restockItems[idx];
+    const label = [item.name, item.variantName].filter(Boolean).join(' – ');
+    showConfirm(`Slett «${label}»?`, 'Varen fjernes fra påfylllisten.', () => {
+        restockItems.splice(idx, 1);
+        saveRestockItems();
+        updateRestockList();
+    });
+}
+
+function editRestockItem(variantId, productId) {
+    const item = restockItems.find(i =>
+        (i.variantId === variantId || (!i.variantId && variantId === '')) && i.productId === productId);
+    if (!item) return;
+
+    const product = {
+        name: item.name,
+        variantName: item.variantName || '',
+        ean: item.ean,
+        variantId: item.variantId,
+        productId: item.productId,
+        quantity: item.oldQty !== undefined ? item.oldQty : 0,
+    };
+
+    if (appMode !== 'restock') {
+        switchMode('restock');
+    }
+    showProductCard(product, item.ean || '');
+
+    setTimeout(() => {
+        const input = document.getElementById('qtyInput');
+        if (input) {
+            const oldQty = item.oldQty !== undefined ? item.oldQty : 0;
+            input.value = item.addQty || 0;
+            updateRestockCalc(oldQty);
+        }
+    }, 50);
 }
 
 function registerCount(variantId, productId, name, ean, oldQty, variantName) {
@@ -1890,6 +1428,61 @@ function updateBadge() {
 
 
 // ─── SAVE TO MYSTORE ─────────────────────────────────
+function saveAll() {
+    if (appMode === 'restock') saveAllRestockToMyStore();
+    else saveAllToMyStore();
+}
+
+async function saveAllRestockToMyStore() {
+    const pending = restockItems.filter(i => i.status !== 'saved');
+    if (pending.length === 0) { showToast('Ingen ventende påfyll å lagre', 'error'); return; }
+
+    const saveBtn = document.getElementById('saveBtn');
+    const wrap    = document.getElementById('saveProgressWrap');
+    const bar     = document.getElementById('saveProgressBar');
+    const lbl     = document.getElementById('saveProgressLabel');
+
+    saveBtn.disabled = true;
+    wrap.style.display = 'block';
+    bar.style.width = '0%';
+
+    let done = 0;
+    let savedCount = 0;
+    for (const item of pending) {
+        const name    = [item.name, item.variantName].filter(Boolean).join(' – ');
+        const newQty  = item.oldQty + item.addQty;
+        lbl.textContent = `Lagrer ${done + 1} av ${pending.length}: ${name}`;
+        bar.style.width = Math.round((done / pending.length) * 100) + '%';
+        await new Promise(r => setTimeout(r, 60));
+        try {
+            if (!item.variantId) {
+                await updateProductStock(item.productId, newQty);
+            } else {
+                await updateVariantStock(item.variantId, newQty);
+            }
+            item.status = 'saved';
+            item.oldQty = newQty; // oppdater slik at dobbel-lagring ikke dobler igjen
+            savedCount++;
+            const cacheKey = item.variantId ? 'vid:' + item.variantId : item.ean;
+            if (cacheKey && productCache[cacheKey]) productCache[cacheKey].quantity = newQty;
+            if (item.ean && productCache[item.ean]) productCache[item.ean].quantity = newQty;
+        } catch(e) {
+            item.status = 'error';
+            showToast(`Feil ved lagring: ${e.message}`, 'error');
+        }
+        done++;
+    }
+
+    bar.style.width = '100%';
+    lbl.textContent = `Ferdig! ${savedCount} påfyll lagret.`;
+    restockItems = restockItems.filter(item => item.status !== 'saved');
+    saveRestockItems();
+    await new Promise(r => setTimeout(r, 1200));
+    wrap.style.display = 'none';
+    saveBtn.disabled = false;
+    updateRestockList();
+}
+
 async function saveAllToMyStore() {
     const pending = countedItems.filter(i => i.status !== 'saved');
     if (pending.length === 0) {
@@ -2049,6 +1642,23 @@ function showToast(msg, type = '') {
     el.className = 'toast show' + (type ? ' ' + type : '');
     clearTimeout(el._timer);
     el._timer = setTimeout(() => el.className = 'toast', 2500);
+}
+
+async function hardReloadApp() {
+    try {
+        if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+        }
+        if (window.caches && caches.keys) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+        }
+    } catch (e) {
+        console.warn('Hard reload cleanup feilet:', e);
+    } finally {
+        window.location.reload();
+    }
 }
 </script>
 

@@ -1,4 +1,4 @@
-const CACHE = 'varetelling-v23';
+const CACHE = 'varetelling-v24';
 
 self.addEventListener('install', e => {
     e.waitUntil(
