@@ -92,7 +92,7 @@
                         <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Legg til antall på eksisterende lager</span>
                     </button>
                     <button onclick="refreshProductCache()">🔄 Oppdater produktliste
-                        <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tving ny nedlasting fra MyStore</span>
+                        <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tving ny nedlasting av produkter fra nettbutikken</span>
                     </button>
                     <button id="appRefreshBtn" onclick="hardReloadApp(); closeMoreMenu()">🔄 Oppdater appen
                         <span class="menu-update-badge" id="appRefreshMenuBadge" aria-hidden="true">1</span>
@@ -235,6 +235,23 @@ async function setProgress(pct, label) {
     await new Promise(r => setTimeout(r, 60));
 }
 
+async function setBottomProgress(pct, label) {
+    const bar  = document.getElementById('saveProgressBar');
+    const lbl  = document.getElementById('saveProgressLabel');
+    const wrap = document.getElementById('saveProgressWrap');
+    if (!bar || !lbl || !wrap) return;
+    if (pct === null) {
+        wrap.style.display = 'none';
+        bar.style.width = '0%';
+        lbl.textContent = '';
+        return;
+    }
+    wrap.style.display = 'block';
+    bar.style.width = pct + '%';
+    if (label) lbl.textContent = label;
+    await new Promise(r => setTimeout(r, 60));
+}
+
 function toggleMoreMenu(e) {
     e.stopPropagation();
     document.getElementById('moreDropdown').classList.toggle('open');
@@ -317,7 +334,6 @@ function switchMode(mode) {
     // Lukk eventuelle åpne produktkort
     document.getElementById('currentProduct').innerHTML = '';
     restoreScannerArea();
-    showToast(isRestock ? '📦 Varepåfyll-modus aktivert' : '🔢 Varetelling-modus aktivert', 'success');
 }
 
 // ─── SETUP ───────────────────────────────────────────
@@ -1389,10 +1405,24 @@ function updateCountedList() {
 
 async function refreshProductCache() {
     closeMoreMenu();
-    showToast('Oppdaterer produktliste fra MyStore...', 'success');
-    productCache = {};
-    localStorage.removeItem(PRODUCT_CACHE_KEY);
-    await cacheAllVariants(null, true);
+    const saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) saveBtn.disabled = true;
+
+    try {
+        showToast('Oppdaterer produktliste fra nettbutikken...', 'success');
+        productCache = {};
+        localStorage.removeItem(PRODUCT_CACHE_KEY);
+        await setBottomProgress(5, 'Forbereder nedlasting av produktliste...');
+        await cacheAllVariants(setBottomProgress, true);
+        await setBottomProgress(100, 'Produktlisten er oppdatert');
+        await new Promise(r => setTimeout(r, 900));
+    } catch (e) {
+        addDebugLog('Oppdatering av produktliste feilet: ' + e.message);
+        showToast('Kunne ikke oppdatere produktliste: ' + e.message, 'error');
+    } finally {
+        await setBottomProgress(null);
+        if (saveBtn) saveBtn.disabled = false;
+    }
 }
 
 // Slett alle telte varer

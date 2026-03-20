@@ -18,6 +18,7 @@
     --danger-bg: rgba(225, 112, 85, 0.12);
     --restock: #00bcd4;
     --restock-bg: rgba(0, 188, 212, 0.12);
+    --mode-banner-height: 24px;
     --radius: 12px;
     --radius-sm: 8px;
 }
@@ -951,11 +952,22 @@ body {
     text-align: center;
     padding: 4px 0;
     letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 110;
+    height: var(--mode-banner-height);
 }
 
 body.restock-mode .mode-banner { display: block; }
 
-body.restock-mode .header { border-bottom-color: var(--restock); }
+body.restock-mode .header {
+    top: var(--mode-banner-height);
+    border-bottom-color: var(--restock);
+}
+
+body.restock-mode .scanner-layout {
+    height: calc(100dvh - 57px - var(--mode-banner-height));
+}
 
 body.restock-mode #saveBtn { background: var(--restock); }
 
