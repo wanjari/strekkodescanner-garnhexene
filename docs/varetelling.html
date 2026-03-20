@@ -55,7 +55,7 @@
             <!-- Manual EAN entry -->
             <div class="manual-entry">
                 <input type="text" id="manualEan" placeholder="Tast inn EAN / strekkode..." inputmode="numeric">
-                <button class="btn btn-primary btn-sm" onclick="manualLookup()">Søk</button>
+                <button class="btn btn-primary btn-sm" id="manualLookupBtn" onclick="manualLookup()">Søk</button>
             </div>
 
             <!-- Current product -->
@@ -66,6 +66,18 @@
 
             <!-- Restock items -->
             <div id="restockSection"></div>
+        </div>
+
+        <div id="refreshProgressWrap" style="display:none; position:fixed; inset:0; z-index:130; background:rgba(15,17,23,0.78); backdrop-filter:blur(3px); padding:24px; align-items:center; justify-content:center;">
+            <div style="width:min(100%, 420px); background:#1e1e2e; border:1px solid #333; border-radius:16px; box-shadow:0 18px 48px rgba(0,0,0,0.45); padding:22px 18px 18px; text-align:center;">
+                <div style="font-size:17px; font-weight:700; color:#fff; margin-bottom:8px;">Oppdaterer produktliste</div>
+                <div id="refreshProgressText" style="font-size:14px; color:#cdd6f4; line-height:1.45; margin-bottom:10px;">Produktlisten lastes inn på nytt fra nettbutikken.</div>
+                <div id="refreshProgressHint" style="font-size:12px; color:#8b8fa3; line-height:1.45; margin-bottom:14px;">Skanning og søk er midlertidig låst. Du kan fortsette å bruke appen når oppdateringen er ferdig.</div>
+                <div style="width:100%; height:8px; background:#333; border-radius:99px; overflow:hidden;">
+                    <div id="refreshProgressBar" style="height:100%; width:0%; background:#00b894; border-radius:99px;"></div>
+                </div>
+                <div id="refreshProgressLabel" style="font-size:12px; color:#aaa; margin-top:10px; text-align:center;"></div>
+            </div>
         </div>
 
         <div id="saveProgressWrap" style="display:none; position:fixed; bottom:80px; left:0; right:0; z-index:101; padding:6px 20px; background:#1e1e2e; border-top:1px solid #333;">
@@ -142,6 +154,7 @@ let updateAvailable = false;
 let updateToastShown = false;
 let wakeLock = null;
 let wakeLockSupportLogged = false;
+let isRefreshingProductCache = false;
 
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
@@ -160,6 +173,24 @@ function saveSession() {
     const data = { shopName: config.shopName, apiKey: config.apiKey, lastActivity: Date.now() };
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch(e) {}
     console.log('saveSession: lagret sesjon', data.shopName, 'key:', SESSION_KEY);
+}
+
+function setProductRefreshBusy(isBusy) {
+    isRefreshingProductCache = isBusy;
+
+    const manualInput = document.getElementById('manualEan');
+    const manualBtn = document.getElementById('manualLookupBtn');
+
+    if (manualInput) {
+        manualInput.disabled = isBusy;
+        manualInput.placeholder = isBusy
+            ? 'Oppdaterer produktliste...'
+            : 'Tast inn EAN / strekkode...';
+    }
+
+    if (manualBtn) {
+        manualBtn.disabled = isBusy;
+    }
 }
 
 async function acquireScreenWakeLock() {
@@ -249,6 +280,27 @@ async function setBottomProgress(pct, label) {
     wrap.style.display = 'block';
     bar.style.width = pct + '%';
     if (label) lbl.textContent = label;
+    await new Promise(r => setTimeout(r, 60));
+}
+
+async function setRefreshOverlayProgress(pct, label, text = null) {
+    const bar  = document.getElementById('refreshProgressBar');
+    const lbl  = document.getElementById('refreshProgressLabel');
+    const wrap = document.getElementById('refreshProgressWrap');
+    const body = document.getElementById('refreshProgressText');
+    if (!bar || !lbl || !wrap || !body) return;
+    if (pct === null) {
+        wrap.style.display = 'none';
+        wrap.style.display = 'none';
+        bar.style.width = '0%';
+        lbl.textContent = '';
+        body.textContent = 'Produktlisten lastes inn på nytt fra nettbutikken.';
+        return;
+    }
+    wrap.style.display = 'flex';
+    bar.style.width = pct + '%';
+    if (label) lbl.textContent = label;
+    if (text) body.textContent = text;
     await new Promise(r => setTimeout(r, 60));
 }
 
@@ -591,7 +643,8 @@ async function fetchAllPagesRaw(path, maxPages = 50, onPageProgress = null) {
 }
 
 
-async function cacheAllVariants(onProgress = null, forceRefresh = false) {
+async function cacheAllVariants(onProgress = null, forceRefresh = false, options = {}) {
+    const { useScannerStatus = true } = options;
     const prog = async (pct, lbl) => {
         if (onProgress) await onProgress(pct, lbl);
     };
@@ -614,7 +667,7 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
         } catch(e) { addDebugLog('Cache-les feil: ' + e.message); }
     }
 
-    updateScannerStatus('Laster data parallelt...');
+    if (useScannerStatus) updateScannerStatus('Laster data parallelt...');
     await prog(20, 'Laster produkter og attributter...');
 
     // Last produkter
@@ -652,7 +705,7 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
 
     // Last varianter med product-attributes som include (henter kun attributter
     // for akkurat de variantene på hver side – ingen separat paginering)
-    updateScannerStatus('Laster varianter...');
+    if (useScannerStatus) updateScannerStatus('Laster varianter...');
     await prog(50, 'Laster varianter (side 1)...');
 
     const variantPages = await fetchAllPagesRaw(
@@ -834,6 +887,7 @@ function startScanner() {
 }
 
 function onScanSuccess(decodedText) {
+    if (isRefreshingProductCache) return;
     const now = Date.now();
     if (decodedText === lastScannedCode && (now - lastScanTime) < 3000) return;
     lastScannedCode = decodedText;
@@ -845,6 +899,10 @@ function onScanSuccess(decodedText) {
 }
 
 function manualLookup() {
+    if (isRefreshingProductCache) {
+        showToast('Vent til produktlisten er ferdig oppdatert', 'error');
+        return;
+    }
     const ean = document.getElementById('manualEan').value.trim();
     if (!ean) return;
     document.getElementById('manualEan').value = '';
@@ -1064,6 +1122,10 @@ async function lookupProduct(code) {
 function collapseScannerArea() {
     document.getElementById('scannerArea').classList.add('collapsed');
     // Stopp kameraet for å spare strøm
+    stopScanner();
+}
+
+function stopScanner() {
     if (isScanning && html5QrCode) {
         html5QrCode.stop().catch(() => {});
         isScanning = false;
@@ -1406,22 +1468,38 @@ function updateCountedList() {
 async function refreshProductCache() {
     closeMoreMenu();
     const saveBtn = document.getElementById('saveBtn');
+    const scannerScreen = document.getElementById('scannerScreen');
+    const scannerArea = document.getElementById('scannerArea');
+    const shouldRestartScanner = Boolean(
+        scannerScreen?.classList.contains('active') &&
+        scannerArea &&
+        !scannerArea.classList.contains('collapsed') &&
+        isScanning
+    );
+
     if (saveBtn) saveBtn.disabled = true;
+    setProductRefreshBusy(true);
+    stopScanner();
 
     try {
         showToast('Oppdaterer produktliste fra nettbutikken...', 'success');
         productCache = {};
         localStorage.removeItem(PRODUCT_CACHE_KEY);
-        await setBottomProgress(5, 'Forbereder nedlasting av produktliste...');
-        await cacheAllVariants(setBottomProgress, true);
-        await setBottomProgress(100, 'Produktlisten er oppdatert');
+        await setRefreshOverlayProgress(5, 'Forbereder nedlasting...', 'Produktlisten lastes inn på nytt fra nettbutikken.');
+        await cacheAllVariants(setRefreshOverlayProgress, true, { useScannerStatus: false });
+        await setRefreshOverlayProgress(100, 'Produktlisten er oppdatert', 'Oppdateringen er fullført. Du kan fortsette å bruke appen nå.');
         await new Promise(r => setTimeout(r, 900));
+        updateScannerStatus('Skann en strekkode...');
     } catch (e) {
         addDebugLog('Oppdatering av produktliste feilet: ' + e.message);
         showToast('Kunne ikke oppdatere produktliste: ' + e.message, 'error');
     } finally {
-        await setBottomProgress(null);
+        setProductRefreshBusy(false);
+        await setRefreshOverlayProgress(null);
         if (saveBtn) saveBtn.disabled = false;
+        if (shouldRestartScanner && !isScanning) {
+            startScanner();
+        }
     }
 }
 
