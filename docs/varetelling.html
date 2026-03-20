@@ -121,6 +121,7 @@ const SESSION_TIMEOUT      = 2 * 60 * 60 * 1000; // 2 timer
 const PRODUCT_CACHE_VERSION = 5;
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 const APP_UPDATED_FLAG_KEY = 'ms_app_updated_notice';
+const APP_UPDATED_QUERY_KEY = 'appUpdated';
 const APP_LOADED_AT = Date.now();
 const UPDATE_CHECK_PATHS = ['./varetelling.html', './styles.css', './crypto.js', './sw.js'];
 
@@ -835,10 +836,16 @@ function manualLookup() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    const currentUrl = new URL(window.location.href);
+    const appUpdatedFromQuery = currentUrl.searchParams.get(APP_UPDATED_QUERY_KEY) === '1';
     try {
         const updatedFlag = sessionStorage.getItem(APP_UPDATED_FLAG_KEY);
-        if (updatedFlag) {
+        if (updatedFlag || appUpdatedFromQuery) {
             sessionStorage.removeItem(APP_UPDATED_FLAG_KEY);
+            if (appUpdatedFromQuery) {
+                currentUrl.searchParams.delete(APP_UPDATED_QUERY_KEY);
+                window.history.replaceState({}, '', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+            }
             setTimeout(() => {
                 showToast('Appen er oppdatert til siste versjon', 'success');
                 addDebugLog('Appen ble lastet på nytt etter oppdatering');
@@ -1699,13 +1706,38 @@ function updateScannerStatus(text) {
     }
 }
 
+function hideToast() {
+    const el = document.getElementById('toast');
+    clearTimeout(el._timer);
+    el.className = 'toast';
+}
+
 function showToast(msg, type = '') {
     const el = document.getElementById('toast');
-    el.textContent = msg;
+    el.innerHTML = '';
+
+    const content = document.createElement('div');
+    content.className = 'toast-content';
+
+    const message = document.createElement('div');
+    message.className = 'toast-message';
+    message.textContent = msg;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'toast-close';
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Lukk varsel');
+    closeBtn.textContent = '✕';
+    closeBtn.onclick = hideToast;
+
+    content.appendChild(message);
+    content.appendChild(closeBtn);
+    el.appendChild(content);
+
     el.className = 'toast show' + (type ? ' ' + type : '');
     clearTimeout(el._timer);
     const duration = Math.max(6500, Math.min(11000, 3200 + String(msg || '').length * 55));
-    el._timer = setTimeout(() => el.className = 'toast', duration);
+    el._timer = setTimeout(hideToast, duration);
 }
 
 async function hardReloadApp() {
@@ -1727,7 +1759,10 @@ async function hardReloadApp() {
     } catch (e) {
         console.warn('Hard reload cleanup feilet:', e);
     } finally {
-        window.location.reload();
+        const reloadUrl = new URL('./varetelling.html', window.location.href);
+        reloadUrl.searchParams.set(APP_UPDATED_QUERY_KEY, '1');
+        reloadUrl.searchParams.set('ts', String(Date.now()));
+        window.location.replace(reloadUrl.toString());
     }
 }
 </script>
