@@ -305,8 +305,13 @@
             background: #000;
             flex: 0 0 auto;
             height: 202px;
+            width: 100%;
             overflow: hidden;
             cursor: crosshair;
+            transition: height 0.25s ease;
+        }
+        .scanner-area.collapsed {
+            height: 0 !important;
         }
         .focus-ring {
             position: absolute;
@@ -784,7 +789,6 @@
 <div class="screen" id="scannerScreen">
     <div class="header">
         <h1>Varetelling <span>Garnhexene</span></h1>
-        <span class="badge" id="countBadge">0 telt</span>
     </div>
     <div class="scanner-layout">
         <div class="scanner-area" id="scannerArea">
@@ -817,7 +821,7 @@
 
         <div class="bottom-bar">
             <button class="btn btn-success" id="saveBtn" onclick="saveAllToMyStore()">
-                Lagre alle til Garnhexene varelager
+                Lagre alle
             </button>
             <div class="more-menu" id="moreMenu">
                 <button class="btn btn-secondary more-trigger" onclick="toggleMoreMenu(event)" style="flex: 0 0 auto; width: auto; padding: 16px; font-size: 20px; line-height:1;">
@@ -846,7 +850,7 @@ const PRODUCT_CACHE_KEY    = 'ms_product_cache';
 const COUNTED_ITEMS_KEY    = 'ms_counted_items';
 const SESSION_KEY          = 'ms_session';
 const SESSION_TIMEOUT      = 2 * 60 * 60 * 1000; // 2 timer
-const PRODUCT_CACHE_VERSION = 3;
+const PRODUCT_CACHE_VERSION = 5;
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 
 // ─── STATE ───────────────────────────────────────────
@@ -1270,13 +1274,14 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     await prog(50, 'Laster varianter (side 1)...');
 
     const variantPages = await fetchAllPagesRaw(
-        '/product-variants?page[size]=100&include=product-attributes',
-        50,
+        '/product-variants?page[size]=250&include=product-attributes',
+        100,
         async (page, total) => {
             const pct = 50 + Math.round((page / total) * 38);
             await prog(pct, `Laster varianter (side ${page}/${total})...`);
         }
     );
+    addDebugLog(`Hentet ${variantPages.length} variant-sider med page[size]=250`);
 
     // Bygg pa → opsjonverdi-id kart fra included-data
     const paToOptionValueId = {};
@@ -1307,6 +1312,11 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
         if (!firstNamedLogged && vName) {
             addDebugLog(`Første variant med navn: id=${v.id}, vName="${vName}"`);
             firstNamedLogged = true;
+        }
+        // Debug: logg varianter med paIds men uten navn
+        if (paIds.length > 0 && !vName && variantCount < 5) {
+            const ovIds = paIds.map(id => paToOptionValueId[id] || 'mangler');
+            addDebugLog(`Variant ${v.id} har ${paIds.length} paId(s), ovIds=[${ovIds.join(',')}], ean=${attr.ean||'-'}`);
         }
 
         const entry = {
@@ -1367,7 +1377,7 @@ function startScanner() {
     html5QrCode = new Html5Qrcode("reader");
 
     const scanConfig = {
-        fps: 20,
+        fps: 8,
         aspectRatio: 1.5,
         formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
@@ -1512,23 +1522,42 @@ async function lookupProduct(code) {
         addDebugLog('Ikke i cache, søker API for varianter...');
         // Fallback: search API by EAN filter on variants
         try {
-            const data = await apiFetch(`/product-variants?filter[ean][path]=ean&filter[ean][value]=${encodeURIComponent(code)}&page[size]=1`);
+            const data = await apiFetch(`/product-variants?filter[ean][path]=ean&filter[ean][value]=${encodeURIComponent(code)}&page[size]=1&include=product-attributes`);
             if (data.data && data.data.length > 0) {
                 const v = data.data[0];
                 const productId = v.relationships?.product?.data?.id;
-                // Fetch product name
+
+                // Hent produktnavn
                 const pData = await apiFetch(`/products/${productId}?fields[products]=name`);
-                const name = pData.data?.attributes?.name?.no || 'Ukjent';
+                const name = decodeHtmlEntities(pData.data?.attributes?.name?.no || pData.data?.attributes?.name?.en || 'Ukjent');
+
+                // Hent variantnavn fra inkluderte product-attributes → option-values
+                let variantName = '';
+                const includedPAs = (data.included || []).filter(i => i.type === 'product-attributes');
+                const ovIds = includedPAs
+                    .map(pa => pa.relationships?.['product-option-value']?.data?.id)
+                    .filter(Boolean);
+                if (ovIds.length > 0) {
+                    try {
+                        const ovParts = await Promise.all(ovIds.map(async ovId => {
+                            const ovData = await apiFetch(`/product-option-values/${ovId}`);
+                            const n = ovData.data?.attributes?.name;
+                            const raw = (n && typeof n === 'object')
+                                ? (n.no || n.en || Object.values(n)[0] || '') : (n || '');
+                            return decodeHtmlEntities(raw);
+                        }));
+                        variantName = ovParts.filter(Boolean).join(' / ');
+                    } catch(e) { addDebugLog('Feil ved henting av option-values: ' + e.message); }
+                }
+
                 const entry = {
-                    productId: productId,
-                    variantId: v.id,
-                    name: name,
-                    variantName: '',
+                    productId, variantId: v.id, name, variantName,
                     ean: v.attributes.ean || '',
                     sku: v.attributes.sku || '',
                     quantity: parseInt(v.attributes.quantity) || 0
                 };
                 if (entry.ean) productCache[entry.ean] = entry;
+                productCache['vid:' + v.id] = entry;
                 addDebugLog('Funnet i varianter: ' + JSON.stringify(entry));
                 showProductCard(entry, code);
             } else {
@@ -1596,15 +1625,37 @@ async function lookupProduct(code) {
     }
 }
 
+function collapseScannerArea() {
+    document.getElementById('scannerArea').classList.add('collapsed');
+    // Stopp kameraet for å spare strøm
+    if (isScanning && html5QrCode) {
+        html5QrCode.stop().catch(() => {});
+        isScanning = false;
+    }
+}
+
+function restoreScannerArea() {
+    document.getElementById('scannerArea').classList.remove('collapsed');
+    updateScannerStatus('Skann en strekkode...');
+    // Start kameraet igjen
+    if (!isScanning) {
+        startScanner();
+    }
+}
+
 function showProductCard(product, scannedCode) {
     updateScannerStatus('Funnet!');
+    collapseScannerArea();
+    if (!product.variantName && product.variantId) {
+        addDebugLog(`Mangler variantnavn: variantId=${product.variantId}, ean=${product.ean}, produktnavn=${product.name}`);
+    }
     const itemId = product.variantId || product.productId;
     const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
     const currentQty = existing ? existing.newQty : product.quantity;
 
     const html = `
         <div class="product-card" style="position:relative;">
-            <button onclick="document.getElementById('currentProduct').innerHTML=''" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
+            <button onclick="document.getElementById('currentProduct').innerHTML=''; restoreScannerArea();" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
             ${existing ? `
             <div class="already-counted-banner">
                 ⚠️ Allerede telt – tidligere antall: <strong>${existing.newQty}</strong>
@@ -1612,16 +1663,13 @@ function showProductCard(product, scannedCode) {
             <div class="product-name">${escHtml(product.name)}</div>
             ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
             <div class="product-meta">
-                ${product.ean ? 'EAN: ' + escHtml(product.ean) + ' · ' : ''}
-                ${product.variantId ? 'Variant: ' + product.variantId + ' · ' : ''}
-                Produkt: ${product.productId}
+                ${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}
             </div>
             <div class="stock-row">
                 <span class="stock-label">Nåværende lager:</span>
                 <span class="stock-value">${product.quantity}</span>
             </div>
             <div class="qty-input-row">
-                <label>Telt antall:</label>
                 <div class="qty-stepper-multi">
                     <button class="qty-btn minus-multi" onclick="stepQty(-20)">−20</button>
                     <button class="qty-btn minus-multi" onclick="stepQty(-10)">−10</button>
@@ -1677,6 +1725,7 @@ function registerCount(variantId, productId, name, ean, oldQty, variantName) {
     }
 
     document.getElementById('currentProduct').innerHTML = '';
+    restoreScannerArea();
     updateCountedList();
     updateBadge();
     saveCountedItems();
@@ -1714,7 +1763,7 @@ function updateCountedList() {
                     <div class="item-info">
                         <div class="item-name">${escHtml(productName)}</div>
                         ${variantName ? `<div class="item-variant">${escHtml(variantName)}</div>` : ''}
-                        <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}${item.variantId ? ' · Variant: ' + item.variantId : ''}</div>
+                        <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}</div>
                     </div>
                     <span class="item-qty">${item.newQty}</span>
                 </div>
@@ -1836,7 +1885,7 @@ function editCountedItem(variantId, productId) {
 }
 
 function updateBadge() {
-    document.getElementById('countBadge').textContent = countedItems.length + ' telt';
+    const badge = document.getElementById('countBadge'); if (badge) badge.textContent = countedItems.length + ' telt';
 }
 
 
