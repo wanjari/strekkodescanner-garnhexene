@@ -1,4 +1,4 @@
-const CACHE = 'varetelling-v16';
+const CACHE = 'varetelling-v20';
 
 self.addEventListener('install', e => {
     // Cache kun selve HTML-filen ved install

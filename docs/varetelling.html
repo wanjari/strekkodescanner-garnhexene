@@ -304,7 +304,7 @@
             position: relative;
             background: #000;
             flex: 0 0 auto;
-            height: 280px;
+            height: 224px;
             overflow: hidden;
             cursor: crosshair;
         }
@@ -753,7 +753,7 @@
 
         /* Responsive tweaks */
         @media (min-width: 600px) {
-            .scanner-area { height: 340px; }
+            .scanner-area { height: 272px; }
             .content-area { max-width: 560px; margin: 0 auto; }
         }
     </style>
@@ -840,10 +840,20 @@
 </div>
 
 <script>
+// ─── KONSTANTER ──────────────────────────────────────
+const STORAGE_KEY          = 'ms_enc_v1';
+const PRODUCT_CACHE_KEY    = 'ms_product_cache';
+const COUNTED_ITEMS_KEY    = 'ms_counted_items';
+const SESSION_KEY          = 'ms_session';
+const SESSION_TIMEOUT      = 2 * 60 * 60 * 1000; // 2 timer
+const PRODUCT_CACHE_VERSION = 3;
+const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
+
 // ─── STATE ───────────────────────────────────────────
 let config = { shopName: '', apiKey: '' };
 let productCache = {};      // EAN → { id, variantId, name, ean, sku, quantity, productId }
 let countedItems = [];       // { variantId, productId, name, ean, sku, oldQty, newQty, status }
+try { countedItems = JSON.parse(localStorage.getItem(COUNTED_ITEMS_KEY) || '[]'); } catch(e) { countedItems = []; }
 let html5QrCode = null;
 let isScanning = false;
 let lastScannedCode = '';
@@ -857,6 +867,37 @@ function addDebugLog(message) {
 
 function saveCountedItems() {
     try { localStorage.setItem(COUNTED_ITEMS_KEY, JSON.stringify(countedItems)); } catch(e) {}
+}
+
+function saveSession() {
+    const data = { shopName: config.shopName, apiKey: config.apiKey, lastActivity: Date.now() };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch(e) {}
+    console.log('saveSession: lagret sesjon', data.shopName, 'key:', SESSION_KEY);
+}
+function touchSession() {
+    try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (raw) {
+            const s = JSON.parse(raw);
+            s.lastActivity = Date.now();
+            localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+        }
+    } catch(e) {}
+}
+function loadSession() {
+    try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        console.log('loadSession: raw=', raw ? raw.substring(0,60) : 'null');
+        if (!raw) return null;
+        const s = JSON.parse(raw);
+        const age = Date.now() - s.lastActivity;
+        console.log('loadSession: alder=', Math.round(age/1000) + 's', 'timeout=', SESSION_TIMEOUT/1000 + 's');
+        if (age > SESSION_TIMEOUT) { localStorage.removeItem(SESSION_KEY); return null; }
+        return s;
+    } catch(e) { console.log('loadSession feil:', e); return null; }
+}
+function clearSession() {
+    localStorage.removeItem(SESSION_KEY);
 }
 
 async function setProgress(pct, label) {
@@ -882,15 +923,6 @@ function closeMoreMenu() {
 document.addEventListener('click', () => closeMoreMenu());
 
 // ─── KRYPTO (AES-256-GCM + PBKDF2) ──────────────────
-const STORAGE_KEY = 'ms_enc_v1';
-const PRODUCT_CACHE_KEY = 'ms_product_cache';
-const COUNTED_ITEMS_KEY = 'ms_counted_items';
-const PRODUCT_CACHE_VERSION = 2;
-
-// Last telte varer fra forrige sesjon
-try { countedItems = JSON.parse(localStorage.getItem(COUNTED_ITEMS_KEY) || '[]'); } catch(e) { countedItems = []; }  // øk ved format-endringer for å tvinge reload
-const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
-
 async function deriveKey(pin, salt) {
     const keyMaterial = await crypto.subtle.importKey(
         'raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveKey']
@@ -1012,6 +1044,7 @@ async function setupAndConnect() {
 
         showToast('Tilkoblet! Laster produkter...', 'success');
         await cacheAllVariants();
+        saveSession();
         goToScanner();
     } catch (err) {
         addDebugLog('Tilkobling feilet: ' + err.message);
@@ -1039,6 +1072,7 @@ async function unlockWithPin() {
         showToast('Tilkoblet! Laster produkter...', 'success');
         await cacheAllVariants(setProgress);
         setProgress(null);
+        saveSession();
         goToScanner();
     } catch (err) {
         const isCryptoErr = err.name === 'OperationError';
@@ -1067,6 +1101,7 @@ function logoutAndReset() {
             localStorage.removeItem(STORAGE_KEY);
             localStorage.removeItem(PRODUCT_CACHE_KEY);
             localStorage.removeItem(COUNTED_ITEMS_KEY);
+            clearSession();
             config = { shopName: '', apiKey: '' };
             productCache = {};
             countedItems = [];
@@ -1148,6 +1183,27 @@ async function fetchAllPages(path, maxPages = 50, onPageProgress = null) {
     return allItems;
 }
 
+// Som fetchAllPages, men returnerer hele side-objekter (inkl. "included")
+async function fetchAllPagesRaw(path, maxPages = 50, onPageProgress = null) {
+    const sep = path.includes('?') ? '&' : '?';
+    const firstPage = await apiFetch(`${path}${sep}page[number]=1`);
+    const allPages = [firstPage];
+
+    let lastPage = 1;
+    if (firstPage.links?.last) {
+        const m = firstPage.links.last.match(/page\[number\]=(\d+)/);
+        if (m) lastPage = Math.min(parseInt(m[1]), maxPages);
+    }
+
+    for (let p = 2; p <= lastPage; p++) {
+        const page = await apiFetch(`${path}${sep}page[number]=${p}`);
+        allPages.push(page);
+        if (onPageProgress) await onPageProgress(p, lastPage);
+    }
+
+    return allPages;
+}
+
 
 async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     const prog = async (pct, lbl) => {
@@ -1175,15 +1231,11 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
     updateScannerStatus('Laster data parallelt...');
     await prog(20, 'Laster produkter og attributter...');
 
-    // Last produkter, opsjonsverdier og produktattributter sekvensielt
+    // Last produkter
     await prog(25, 'Laster produkter...');
     const products = await fetchAllPages('/products?page[size]=250&fields[products]=name,sku,ean');
-    await prog(35, 'Laster opsjonsverdier...');
-    const optionValues = await fetchAllPages('/product-option-values?page[size]=250');
-    await prog(45, 'Laster produktattributter...');
-    const productAttrs = await fetchAllPages('/product-attributes?page[size]=250');
 
-    addDebugLog(`Lastet: ${products.length} produkter, ${optionValues.length} opsjonsverdier, ${productAttrs.length} produktattributter`);
+    addDebugLog(`Lastet: ${products.length} produkter`);
 
     // Bygg produktnavn-kart
     const productNames = {};
@@ -1200,7 +1252,9 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
         }
     }
 
-    // Bygg opsjonverdi-kart: id → visningsnavn
+    // Last alle opsjonsverdier (liten tabell – typisk 10‑100 oppføringer)
+    await prog(40, 'Laster opsjonsverdier...');
+    const optionValues = await fetchAllPages('/product-option-values?page[size]=250');
     const optionValueNames = {};
     for (const ov of optionValues) {
         const n = ov.attributes?.name;
@@ -1208,31 +1262,35 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false) {
             ? (n.no || n.en || Object.values(n)[0] || '') : (n || '');
         optionValueNames[ov.id] = decodeHtmlEntities(raw);
     }
-    if (optionValues.length > 0) addDebugLog('Eksempel opsjonverdi: ' + JSON.stringify(optionValues[0]));
+    addDebugLog(`${optionValues.length} opsjonsverdier lastet`);
 
-    // Bygg produktattributt-kart: pa-id → opsjonverdi-id
-    const paToOptionValueId = {};
-    for (const pa of productAttrs) {
-        const ovId = pa.relationships?.['product-option-value']?.data?.id;
-        if (ovId) paToOptionValueId[pa.id] = ovId;
-    }
-    if (productAttrs.length > 0) addDebugLog('Eksempel produktattributt: ' + JSON.stringify(productAttrs[0]));
-    addDebugLog(`${Object.keys(paToOptionValueId).length} produktattributter med opsjonverdi-kobling`);
-
-    // Last varianter (avhenger av de tre over)
+    // Last varianter med product-attributes som include (henter kun attributter
+    // for akkurat de variantene på hver side – ingen separat paginering)
     updateScannerStatus('Laster varianter...');
     await prog(50, 'Laster varianter (side 1)...');
-    const variants = await fetchAllPages(
-        '/product-variants?page[size]=250',
+
+    const variantPages = await fetchAllPagesRaw(
+        '/product-variants?page[size]=100&include=product-attributes',
         50,
         async (page, total) => {
-            const pct = 50 + Math.round((page / total) * 28);
+            const pct = 50 + Math.round((page / total) * 38);
             await prog(pct, `Laster varianter (side ${page}/${total})...`);
         }
     );
-    addDebugLog(`Lastet ${variants.length} varianter`);
-    await prog(80, 'Bygger produktkart...');
-    if (variants.length > 0) addDebugLog('Eksempel variant-objekt: ' + JSON.stringify(variants[0]));
+
+    // Bygg pa → opsjonverdi-id kart fra included-data
+    const paToOptionValueId = {};
+    for (const page of variantPages) {
+        for (const inc of (page.included || [])) {
+            if (inc.type === 'product-attributes') {
+                const ovId = inc.relationships?.['product-option-value']?.data?.id;
+                if (ovId) paToOptionValueId[inc.id] = ovId;
+            }
+        }
+    }
+
+    const variants = variantPages.flatMap(p => p.data || []);
+    addDebugLog(`Lastet ${variants.length} varianter, ${Object.keys(paToOptionValueId).length} produktattributter via include`);
 
     let variantCount = 0;
     let firstNamedLogged = false;
@@ -1390,7 +1448,7 @@ function onScanSuccess(decodedText) {
     lastScanTime = now;
 
     if (navigator.vibrate) navigator.vibrate(100);
-
+    touchSession();
     lookupProduct(decodedText);
 }
 
@@ -1401,11 +1459,42 @@ function manualLookup() {
     lookupProduct(ean);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('manualEan')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') manualLookup();
     });
-    renderSetupScreen();
+
+    // Sjekk om det finnes en aktiv sesjon – hopp over PIN hvis fersk nok
+    const session = loadSession();
+    if (session && localStorage.getItem(STORAGE_KEY)) {
+        config.shopName = session.shopName;
+        config.apiKey   = session.apiKey;
+        await setProgress(10, 'Gjenoppretter sesjon...');
+        await cacheAllVariants(setProgress);
+        setProgress(null);
+        goToScanner();
+    } else {
+        renderSetupScreen();
+    }
+
+    // Sjekk sesjon når appen kommer tilbake i fokus
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && document.getElementById('scannerScreen').classList.contains('active')) {
+            const s = loadSession();
+            if (!s) {
+                // Sesjon utløpt – krev PIN på nytt
+                if (isScanning && html5QrCode) { html5QrCode.stop().catch(() => {}); isScanning = false; }
+                document.getElementById('scannerScreen').classList.remove('active');
+                document.getElementById('setupScreen').classList.add('active');
+                config = { shopName: '', apiKey: '' };
+                renderSetupScreen();
+                showToast('Sesjonen er utløpt. Skriv inn PIN på nytt.', 'error');
+            } else {
+                touchSession();
+            }
+        }
+    });
+
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
@@ -1523,9 +1612,7 @@ function showProductCard(product, scannedCode) {
             <div class="product-name">${escHtml(product.name)}</div>
             ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
             <div class="product-meta">
-                ${product.ean ? 'EAN: ' + escHtml(product.ean) + ' · ' : ''}
-                ${product.variantId ? 'Variant: ' + product.variantId + ' · ' : ''}
-                Produkt: ${product.productId}
+                ${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}
             </div>
             <div class="stock-row">
                 <span class="stock-label">Nåværende lager:</span>
@@ -1591,6 +1678,7 @@ function registerCount(variantId, productId, name, ean, oldQty, variantName) {
     updateCountedList();
     updateBadge();
     saveCountedItems();
+    touchSession();
     showToast(`${name}: ${newQty} stk registrert`, 'success');
     updateScannerStatus('Skann neste vare...');
 }
@@ -1624,7 +1712,7 @@ function updateCountedList() {
                     <div class="item-info">
                         <div class="item-name">${escHtml(productName)}</div>
                         ${variantName ? `<div class="item-variant">${escHtml(variantName)}</div>` : ''}
-                        <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}${item.variantId ? ' · Variant: ' + item.variantId : ''}</div>
+                        <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}</div>
                     </div>
                     <span class="item-qty">${item.newQty}</span>
                 </div>
