@@ -1,9 +1,9 @@
-const CACHE = 'varetelling-v24';
+const CACHE = 'varetelling-v25';
 
 self.addEventListener('install', e => {
     e.waitUntil(
         caches.open(CACHE).then(cache =>
-            cache.addAll(['./varetelling.html', './manifest.json'])
+            cache.addAll(['./varetelling.html', './styles.css', './crypto.js', './manifest.json'])
         ).catch(() => {})
     );
     self.skipWaiting();

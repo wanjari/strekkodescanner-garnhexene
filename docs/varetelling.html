@@ -1690,7 +1690,7 @@ function showToast(msg, type = '') {
     el.textContent = msg;
     el.className = 'toast show' + (type ? ' ' + type : '');
     clearTimeout(el._timer);
-    const duration = Math.max(4200, Math.min(7000, 2200 + String(msg || '').length * 45));
+    const duration = Math.max(6500, Math.min(11000, 3200 + String(msg || '').length * 55));
     el._timer = setTimeout(() => el.className = 'toast', duration);
 }
 
