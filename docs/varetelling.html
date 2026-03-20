@@ -1641,7 +1641,8 @@ function showToast(msg, type = '') {
     el.textContent = msg;
     el.className = 'toast show' + (type ? ' ' + type : '');
     clearTimeout(el._timer);
-    el._timer = setTimeout(() => el.className = 'toast', 2500);
+    const duration = Math.max(4200, Math.min(7000, 2200 + String(msg || '').length * 45));
+    el._timer = setTimeout(() => el.className = 'toast', duration);
 }
 
 async function hardReloadApp() {

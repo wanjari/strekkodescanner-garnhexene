@@ -795,7 +795,13 @@ body {
     opacity: 0;
     transition: all 0.3s ease;
     pointer-events: none;
-    white-space: nowrap;
+    width: min(calc(100vw - 24px), 460px);
+    max-width: calc(100vw - 24px);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    text-align: center;
+    line-height: 1.45;
 }
 
 .toast.show {
