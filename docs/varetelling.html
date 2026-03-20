@@ -95,6 +95,7 @@
                         <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tving ny nedlasting fra MyStore</span>
                     </button>
                     <button id="appRefreshBtn" onclick="hardReloadApp(); closeMoreMenu()">🔄 Oppdater appen
+                        <span class="menu-update-badge" id="appRefreshMenuBadge" aria-hidden="true">1</span>
                         <span id="appRefreshHint" style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px; font-weight:normal;">Tøm cache og hent siste versjon. Beholder API-nøkkel og innstillinger</span>
                     </button>
                     <button onclick="showDebugLog(); closeMoreMenu()">🐛 Feilsøkingslogg</button>
@@ -210,6 +211,7 @@ function setUpdateAvailableState(isAvailable) {
     const hint = document.getElementById('appRefreshHint');
     const moreTrigger = document.getElementById('moreTrigger');
     const moreTriggerBadge = document.getElementById('moreTriggerBadge');
+    const appRefreshMenuBadge = document.getElementById('appRefreshMenuBadge');
     if (!btn || !hint) return;
 
     if (isAvailable) {
@@ -217,6 +219,8 @@ function setUpdateAvailableState(isAvailable) {
         hint.textContent = 'Ny versjon tilgjengelig. Tøm cache og hent siste versjon. Beholder API-nøkkel og innstillinger';
         moreTrigger?.classList.add('has-update');
         moreTriggerBadge?.classList.add('visible');
+        btn.classList.add('has-update');
+        appRefreshMenuBadge?.classList.add('visible');
         if (!updateToastShown) {
             updateToastShown = true;
             showToast('Ny versjon av appen er tilgjengelig. Åpne menyen og velg «Oppdater appen».', 'success');
@@ -226,6 +230,8 @@ function setUpdateAvailableState(isAvailable) {
         hint.textContent = 'Tøm cache og hent siste versjon. Beholder API-nøkkel og innstillinger';
         moreTrigger?.classList.remove('has-update');
         moreTriggerBadge?.classList.remove('visible');
+        btn.classList.remove('has-update');
+        appRefreshMenuBadge?.classList.remove('visible');
     }
 }
 

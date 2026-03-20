@@ -691,23 +691,23 @@ body {
 }
 
 .more-trigger.has-update {
-    border-color: var(--restock);
-    color: var(--restock);
+    border-color: #ff5c7a;
+    color: #ff5c7a;
 }
 
 .more-trigger-badge {
     position: absolute;
-    top: 5px;
-    right: 5px;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
+    top: 3px;
+    right: 3px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
     border-radius: 999px;
-    background: var(--restock);
+    background: #ff5c7a;
     border: 2px solid var(--surface);
-    box-shadow: 0 0 0 2px rgba(0, 188, 212, 0.18);
+    box-shadow: 0 0 0 2px rgba(255, 92, 122, 0.18);
     color: #fff;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     line-height: 1;
     display: flex;
@@ -720,6 +720,38 @@ body {
 }
 
 .more-trigger-badge.visible {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.more-dropdown button.has-update {
+    position: relative;
+    color: #fff;
+}
+
+.menu-update-badge {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #ff5c7a;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transform: scale(0.7);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+}
+
+.menu-update-badge.visible {
     opacity: 1;
     transform: scale(1);
 }
