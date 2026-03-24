@@ -35,6 +35,7 @@
     <div style="width:100%; height:8px; background:#333; border-radius:99px; overflow:hidden;">
         <div id="loadProgressBar" style="height:100%; width:0%; background:#00b894; border-radius:99px;"></div>
     </div>
+    <pre id="loadProgressDebug" style="display:none; margin:10px 0 0; padding:10px 12px; max-height:110px; overflow:auto; background:#151823; border:1px solid #313244; border-radius:8px; color:#a6e3a1; font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; font-family:monospace;"></pre>
 </div>
 
 <!-- SCANNER SCREEN -->
@@ -54,7 +55,7 @@
         <div class="content-area">
             <!-- Manual EAN entry -->
             <div class="manual-entry">
-                <input type="text" id="manualEan" placeholder="Tast inn EAN / strekkode..." inputmode="numeric">
+                <input type="search" id="manualEan" placeholder="Søk etter EAN eller produktnavn..." autocomplete="off" inputmode="search">
                 <button class="btn btn-primary btn-sm" id="manualLookupBtn" onclick="manualLookup()">Søk</button>
             </div>
 
@@ -77,6 +78,7 @@
                     <div id="refreshProgressBar" style="height:100%; width:0%; background:#00b894; border-radius:99px;"></div>
                 </div>
                 <div id="refreshProgressLabel" style="font-size:12px; color:#aaa; margin-top:10px; text-align:center;"></div>
+                <pre id="refreshProgressDebug" style="display:none; margin:12px 0 0; padding:10px 12px; max-height:150px; overflow:auto; background:#151823; border:1px solid #313244; border-radius:8px; color:#a6e3a1; font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; text-align:left; font-family:monospace;"></pre>
             </div>
         </div>
 
@@ -130,7 +132,7 @@ const COUNTED_ITEMS_KEY    = 'ms_counted_items';
 const RESTOCK_ITEMS_KEY    = 'ms_restock_items';
 const SESSION_KEY          = 'ms_session';
 const SESSION_TIMEOUT      = 2 * 60 * 60 * 1000; // 2 timer
-const PRODUCT_CACHE_VERSION = 5;
+const PRODUCT_CACHE_VERSION = 9;
 const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 const APP_UPDATED_FLAG_KEY = 'ms_app_updated_notice';
 const APP_UPDATED_QUERY_KEY = 'appUpdated';
@@ -140,6 +142,9 @@ const UPDATE_CHECK_PATHS = ['./varetelling.html', './styles.css', './crypto.js',
 // ─── STATE ───────────────────────────────────────────
 let config = { shopName: '', apiKey: '' };
 let productCache = {};      // EAN → { id, variantId, name, ean, sku, quantity, productId }
+let productSearchIndex = []; // [{ productId, name, normalizedName, variantCount }]
+let productEntriesByProductId = {}; // productId → { productId, name, standalone, variants[] }
+let productGroupsByProductId = {}; // productId → varegruppe-navn
 let countedItems = [];       // { variantId, productId, name, ean, sku, oldQty, newQty, status }
 try { countedItems = JSON.parse(localStorage.getItem(COUNTED_ITEMS_KEY) || '[]'); } catch(e) { countedItems = []; }
 let restockItems = [];       // { variantId, productId, name, variantName, ean, oldQty, addQty, status }
@@ -155,6 +160,15 @@ let updateToastShown = false;
 let wakeLock = null;
 let wakeLockSupportLogged = false;
 let isRefreshingProductCache = false;
+let activeProductSearchQuery = '';
+let liveSearchTimer = null;
+let relationLookups = {
+    suppliers: {},
+    manufacturers: {},
+    categories: {},
+    accountingGroups: {},
+    stockGroups: {}
+};
 
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
@@ -185,7 +199,7 @@ function setProductRefreshBusy(isBusy) {
         manualInput.disabled = isBusy;
         manualInput.placeholder = isBusy
             ? 'Oppdaterer produktliste...'
-            : 'Tast inn EAN / strekkode...';
+            : 'Søk etter EAN eller produktnavn...';
     }
 
     if (manualBtn) {
@@ -253,16 +267,616 @@ function clearSession() {
     localStorage.removeItem(SESSION_KEY);
 }
 
+function normalizeSearchText(value) {
+    return decodeHtmlEntities(String(value || ''))
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/æ/g, 'ae')
+        .replace(/ø/g, 'o')
+        .replace(/å/g, 'a')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function readLocalizedValue(value) {
+    if (!value) return '';
+    if (typeof value === 'string') return decodeHtmlEntities(value);
+    if (typeof value === 'object') {
+        const localized = value.no || value.nb || value.nn || value.en || Object.values(value)[0] || '';
+        return decodeHtmlEntities(localized);
+    }
+    return decodeHtmlEntities(String(value));
+}
+
+function parseInventoryQuantity(value) {
+    if (value === null || value === undefined || value === '') return 0;
+    const parsed = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function resolveProductInventory(attributes = {}) {
+    const quantity = attributes.quantity;
+    if (quantity !== null && quantity !== undefined && quantity !== '') {
+        return {
+            quantity: parseInventoryQuantity(quantity),
+            source: 'quantity'
+        };
+    }
+
+    const quantityPhysical = attributes.quantity_physical;
+    if (quantityPhysical !== null && quantityPhysical !== undefined && quantityPhysical !== '') {
+        return {
+            quantity: parseInventoryQuantity(quantityPhysical),
+            source: 'quantity_physical'
+        };
+    }
+
+    return {
+        quantity: 0,
+        source: 'none'
+    };
+}
+
+function getShadowStandaloneVariant(productResource, variants = []) {
+    if (!productResource) return null;
+
+    if (variants.length !== 1) return null;
+
+    const variant = variants[0];
+    const productAttributes = variant.relationships?.['product-attributes']?.data || [];
+    const productEan = productResource.attributes?.ean || '';
+    const productSku = productResource.attributes?.sku || '';
+    const variantEan = variant.attributes?.ean || '';
+    const variantSku = variant.attributes?.sku || '';
+    const hasSameIdentity = (!variantEan || !productEan || variantEan === productEan)
+        && (!variantSku || !productSku || variantSku === productSku);
+
+    if (productAttributes.length > 0 || !hasSameIdentity) return null;
+    return variant;
+}
+
+function extractSupplierName(attributes = {}) {
+    const candidateKeys = [
+        'supplier', 'supplier_name', 'supplierName',
+        'vendor', 'vendor_name', 'vendorName',
+        'manufacturer', 'manufacturer_name', 'manufacturerName',
+        'brand', 'brand_name', 'brandName'
+    ];
+
+    for (const key of candidateKeys) {
+        const value = readLocalizedValue(attributes[key]);
+        if (value) return value;
+    }
+
+    return '';
+}
+
+function buildIncludedLookup(pagesOrResources = []) {
+    const lookup = {};
+
+    for (const item of pagesOrResources) {
+        const resources = Array.isArray(item) ? item : (item?.included || []);
+        for (const resource of resources) {
+            if (!resource?.type || !resource?.id) continue;
+            lookup[`${resource.type}:${resource.id}`] = resource;
+        }
+    }
+
+    return lookup;
+}
+
+function extractRelatedSupplierName(resource, includedLookup = {}) {
+    if (!resource) return '';
+
+    const relationshipCandidates = ['supplier', 'suppliers', 'manufacturer'];
+    for (const relationshipName of relationshipCandidates) {
+        const relation = resource.relationships?.[relationshipName]?.data;
+        const relatedItems = Array.isArray(relation) ? relation : (relation ? [relation] : []);
+
+        for (const relatedItem of relatedItems) {
+            const related = includedLookup[`${relatedItem.type}:${relatedItem.id}`];
+            if (!related) continue;
+
+            const name = readLocalizedValue(related.attributes?.name || related.attributes?.title || related.attributes?.label);
+            if (name) return name;
+        }
+    }
+
+    return '';
+}
+
+function buildNameLookup(resources = []) {
+    const lookup = {};
+    for (const resource of resources) {
+        if (!resource?.id) continue;
+        const name = readLocalizedValue(resource.attributes?.name || resource.attributes?.title || resource.attributes?.label || resource.attributes?.group_name);
+        if (name) lookup[String(resource.id)] = name;
+    }
+    return lookup;
+}
+
+function extractSupplierNameFromRelations(resource, relationLookups = {}) {
+    if (!resource) return '';
+
+    const supplierRelation = resource.relationships?.supplier?.data;
+    if (supplierRelation?.id) {
+        return relationLookups.suppliers?.[String(supplierRelation.id)] || '';
+    }
+
+    const suppliersRelation = resource.relationships?.suppliers?.data;
+    if (Array.isArray(suppliersRelation) && suppliersRelation.length > 0) {
+        const names = suppliersRelation
+            .map(item => relationLookups.suppliers?.[String(item.id)] || '')
+            .filter(Boolean);
+        if (names.length > 0) return names.join(', ');
+    }
+
+    const manufacturerRelation = resource.relationships?.manufacturer?.data;
+    if (manufacturerRelation?.id) {
+        return relationLookups.manufacturers?.[String(manufacturerRelation.id)] || '';
+    }
+
+    return '';
+}
+
+function extractProductGroupNameFromRelations(resource, relationLookups = {}, includedLookup = {}) {
+    if (!resource) return '';
+
+    const categoryRelations = resource.relationships?.categories?.data;
+    if (Array.isArray(categoryRelations) && categoryRelations.length > 0) {
+        const names = categoryRelations
+            .map(item => relationLookups.categories?.[String(item.id)]
+                || readLocalizedValue(includedLookup[`${item.type}:${item.id}`]?.attributes?.name
+                    || includedLookup[`${item.type}:${item.id}`]?.attributes?.title
+                    || includedLookup[`${item.type}:${item.id}`]?.attributes?.label))
+            .filter(Boolean);
+        if (names.length > 0) return names.join(', ');
+    }
+
+    const accountingGroupRelation = resource.relationships?.['accounting-group']?.data;
+    if (accountingGroupRelation?.id) {
+        return relationLookups.accountingGroups?.[String(accountingGroupRelation.id)]
+            || readLocalizedValue(includedLookup[`${accountingGroupRelation.type}:${accountingGroupRelation.id}`]?.attributes?.name)
+            || '';
+    }
+
+    const stockGroupRelation = resource.relationships?.['stock-group']?.data;
+    if (stockGroupRelation?.id) {
+        return relationLookups.stockGroups?.[String(stockGroupRelation.id)]
+            || readLocalizedValue(includedLookup[`${stockGroupRelation.type}:${stockGroupRelation.id}`]?.attributes?.group_name
+                || includedLookup[`${stockGroupRelation.type}:${stockGroupRelation.id}`]?.attributes?.name)
+            || '';
+    }
+
+    return '';
+}
+
+function buildProductSearchIndex() {
+    const buckets = {};
+    const seen = new Set();
+    productGroupsByProductId = {};
+
+    for (const entry of Object.values(productCache)) {
+        if (!entry || !entry.productId) continue;
+        const dedupeKey = entry.variantId ? `variant:${entry.variantId}` : `product:${entry.productId}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+
+        if (entry.productGroupName && !productGroupsByProductId[entry.productId]) {
+            productGroupsByProductId[entry.productId] = entry.productGroupName;
+        }
+
+        if (!buckets[entry.productId]) {
+            buckets[entry.productId] = {
+                productId: entry.productId,
+                name: entry.name || 'Ukjent produkt',
+                supplierName: entry.supplierName || '',
+                productGroupName: entry.productGroupName || '',
+                standalone: null,
+                variants: []
+            };
+        }
+
+        if (!buckets[entry.productId].supplierName && entry.supplierName) {
+            buckets[entry.productId].supplierName = entry.supplierName;
+        }
+
+        if (!buckets[entry.productId].productGroupName && entry.productGroupName) {
+            buckets[entry.productId].productGroupName = entry.productGroupName;
+        }
+
+        if (entry.variantId) {
+            buckets[entry.productId].variants.push(entry);
+        } else if (!buckets[entry.productId].standalone) {
+            buckets[entry.productId].standalone = entry;
+        }
+    }
+
+    for (const bucket of Object.values(buckets)) {
+        bucket.variants.sort((a, b) => {
+            const left = `${a.variantName || ''} ${a.ean || ''}`.trim();
+            const right = `${b.variantName || ''} ${b.ean || ''}`.trim();
+            return left.localeCompare(right, 'no', { sensitivity: 'base' });
+        });
+    }
+
+    productEntriesByProductId = buckets;
+    productSearchIndex = Object.values(buckets)
+        .map(bucket => ({
+            productId: bucket.productId,
+            name: bucket.name,
+            supplierName: bucket.supplierName || '',
+            productGroupName: bucket.productGroupName || '',
+            normalizedName: normalizeSearchText(bucket.name),
+            normalizedSupplierName: normalizeSearchText(bucket.supplierName || ''),
+            variantCount: bucket.variants.length
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'no', { sensitivity: 'base' }));
+}
+
+function getProductMetadata({ variantId = '', ean = '', productId = '' } = {}) {
+    const byVariant = variantId ? productCache['vid:' + variantId] : null;
+    if (byVariant) {
+        return {
+            supplierName: byVariant.supplierName || '',
+            productGroupName: byVariant.productGroupName || ''
+        };
+    }
+
+    const byEan = ean ? productCache[ean] : null;
+    if (byEan) {
+        return {
+            supplierName: byEan.supplierName || '',
+            productGroupName: byEan.productGroupName || ''
+        };
+    }
+
+    const bucket = productId ? productEntriesByProductId[productId] : null;
+    if (bucket) {
+        return {
+            supplierName: bucket.supplierName || '',
+            productGroupName: bucket.productGroupName || ''
+        };
+    }
+
+    return {
+        supplierName: '',
+        productGroupName: productId ? (productGroupsByProductId[productId] || '') : ''
+    };
+}
+
+function hydrateQueuedItemMetadata(item) {
+    if (!item) return false;
+    const metadata = getProductMetadata(item);
+    let changed = false;
+
+    if (!item.supplierName && metadata.supplierName) {
+        item.supplierName = metadata.supplierName;
+        changed = true;
+    }
+
+    if (!item.productGroupName && metadata.productGroupName) {
+        item.productGroupName = metadata.productGroupName;
+        changed = true;
+    }
+
+    return changed;
+}
+
+function findProductsByName(query) {
+    const normalizedQuery = normalizeSearchText(query);
+    if (!normalizedQuery) return [];
+
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    return productSearchIndex
+        .filter(product => tokens.every(token =>
+            product.normalizedName.includes(token) || product.normalizedSupplierName.includes(token)
+        ))
+        .map(product => {
+            const name = product.normalizedName;
+            const supplier = product.normalizedSupplierName;
+            const matchesName = tokens.every(token => name.includes(token));
+            const matchesSupplier = tokens.every(token => supplier.includes(token));
+            let score = 6;
+
+            if (name === normalizedQuery) score = 0;
+            else if (name.startsWith(normalizedQuery)) score = 1;
+            else if (tokens.every(token => name.startsWith(token) || name.includes(` ${token}`))) score = 2;
+            else if (matchesName) score = 3;
+            else if (supplier === normalizedQuery) score = 4;
+            else if (supplier.startsWith(normalizedQuery)) score = 5;
+            else if (matchesSupplier) score = 6;
+
+            return { ...product, score };
+        })
+        .sort((a, b) =>
+            a.score - b.score
+            || a.supplierName.localeCompare(b.supplierName, 'no', { sensitivity: 'base' })
+            || a.name.localeCompare(b.name, 'no', { sensitivity: 'base' })
+        )
+        .slice(0, 50);
+}
+
+function clearCurrentProduct() {
+    activeProductSearchQuery = '';
+    document.getElementById('currentProduct').innerHTML = '';
+    restoreScannerArea();
+}
+
+function openSupplierProducts(encodedSupplierName) {
+    const supplierName = decodeURIComponent(encodedSupplierName || '').trim();
+    if (!supplierName) {
+        showToast('Leverandørnavn mangler', 'error');
+        return;
+    }
+
+    const manualInput = document.getElementById('manualEan');
+    if (manualInput) manualInput.value = supplierName;
+    searchProductsByName(supplierName, { showFeedback: false });
+}
+
+function renderSupplierFilterLink(supplierName, className = 'meta-inline-link') {
+    if (!supplierName) return '';
+    return `<button type="button" class="${className}" onclick="openSupplierProducts('${encodeURIComponent(supplierName)}')">${escHtml(supplierName)}</button>`;
+}
+
+function renderMetaLine(parts, className) {
+    const validParts = parts.filter(Boolean);
+    if (validParts.length === 0) return '';
+    return `<div class="${className}">${validParts.join('<span class="meta-separator"> · </span>')}</div>`;
+}
+
+function hasOpenSearchPanel() {
+    return Boolean(document.querySelector('#currentProduct .search-panel'));
+}
+
+function renderProductSearchResults(query, results) {
+    activeProductSearchQuery = query;
+    collapseScannerArea();
+
+    const resultHtml = results.length
+        ? results.map(product => {
+            const variantLabel = product.variantCount > 0
+                ? `${product.variantCount} variant${product.variantCount === 1 ? '' : 'er'}`
+                : 'Produkt uten varianter';
+            const supplierHtml = renderMetaLine([
+                product.supplierName ? escHtml(product.supplierName) : '',
+                product.productGroupName ? escHtml(product.productGroupName) : ''
+            ], 'search-result-meta');
+            return `
+                <button class="search-result-item" type="button" onclick="showVariantPicker('${product.productId}')">
+                    <span class="search-result-main">
+                        <span class="search-result-title">${escHtml(product.name)}</span>
+                        ${supplierHtml}
+                        <span class="search-result-subtitle">${escHtml(variantLabel)}</span>
+                    </span>
+                    <span class="search-result-arrow">Velg</span>
+                </button>`;
+        }).join('')
+        : `<div class="search-empty-state">Ingen produkter matchet «${escHtml(query)}». Prøv et kortere eller mer presist navn.</div>`;
+
+    document.getElementById('currentProduct').innerHTML = `
+        <div class="product-card search-panel" style="position:relative;">
+            <button onclick="clearCurrentProduct()" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
+            <div class="search-panel-header">
+                <div>
+                    <div class="search-panel-title">Produktsøk</div>
+                    <div class="search-panel-subtitle">${results.length} treff på «${escHtml(query)}»</div>
+                </div>
+            </div>
+            <div class="search-result-list">${resultHtml}</div>
+        </div>`;
+
+    updateScannerStatus(results.length ? 'Velg produkt' : 'Ingen treff');
+}
+
+function searchProductsByName(query = '', options = {}) {
+    const { showFeedback = true } = options;
+
+    if (isRefreshingProductCache) {
+        if (showFeedback) showToast('Vent til produktlisten er ferdig oppdatert', 'error');
+        return;
+    }
+
+    if (productSearchIndex.length === 0) {
+        buildProductSearchIndex();
+    }
+
+    if (productSearchIndex.length === 0) {
+        if (showFeedback) showToast('Produktlisten er ikke klar ennå', 'error');
+        return;
+    }
+
+    query = String(query || '').trim();
+    if (query.length < 2) {
+        if (showFeedback) showToast('Skriv minst 2 tegn for å søke', 'error');
+        return;
+    }
+
+    const results = findProductsByName(query);
+    renderProductSearchResults(query, results);
+}
+
+function handleManualInputChange() {
+    if (liveSearchTimer) {
+        clearTimeout(liveSearchTimer);
+        liveSearchTimer = null;
+    }
+
+    const input = document.getElementById('manualEan');
+    const query = input?.value.trim() || '';
+
+    if (!query) {
+        if (hasOpenSearchPanel()) clearCurrentProduct();
+        return;
+    }
+
+    const looksLikeBarcode = /^[0-9]{8,}$/.test(query);
+    const existsInCache = Boolean(productCache[query]);
+
+    if (looksLikeBarcode || existsInCache || query.length < 2) {
+        if (hasOpenSearchPanel()) clearCurrentProduct();
+        return;
+    }
+
+    liveSearchTimer = setTimeout(() => {
+        searchProductsByName(query, { showFeedback: false });
+    }, 180);
+}
+
+async function getFreshStandaloneProductEntry(product) {
+    if (!product || product.variantId) return product;
+
+    try {
+        const pData = await apiFetch(`/products/${product.productId}?include=supplier,suppliers,manufacturer`);
+        const variantData = await apiFetch(`/products/${product.productId}/product-variants?page[size]=10`);
+        const productIncludedLookup = buildIncludedLookup([pData]);
+        const variants = variantData.data || [];
+        const shadowVariant = getShadowStandaloneVariant(pData.data, variants);
+        const resolvedProductInventory = resolveProductInventory(pData.data?.attributes || {});
+        const resolvedQuantity = shadowVariant
+            ? parseInventoryQuantity(shadowVariant.attributes?.quantity)
+            : resolvedProductInventory.quantity;
+        const freshProduct = {
+            ...product,
+            variantId: shadowVariant?.id || null,
+            inventorySource: shadowVariant ? 'shadow-variant' : resolvedProductInventory.source,
+            name: decodeHtmlEntities(pData.data?.attributes?.name?.no || pData.data?.attributes?.name?.en || product.name || 'Ukjent'),
+            supplierName: extractRelatedSupplierName(pData.data, productIncludedLookup)
+                || extractSupplierName(pData.data?.attributes || {})
+                || product.supplierName
+                || '',
+            productGroupName: extractProductGroupNameFromRelations(pData.data, relationLookups, productIncludedLookup)
+                || product.productGroupName
+                || '',
+            ean: pData.data?.attributes?.ean || product.ean || '',
+            sku: shadowVariant?.attributes?.sku || pData.data?.attributes?.sku || product.sku || '',
+            quantity: resolvedQuantity
+        };
+
+        const rawStandaloneSnapshot = {
+            productId: String(product.productId),
+            productAttributes: {
+                quantity: pData.data?.attributes?.quantity ?? null,
+                quantity_physical: pData.data?.attributes?.quantity_physical ?? null,
+                quantity_reserved: pData.data?.attributes?.quantity_reserved ?? null,
+                status: pData.data?.attributes?.status ?? null,
+                ean: pData.data?.attributes?.ean ?? null,
+                sku: pData.data?.attributes?.sku ?? null,
+                name: pData.data?.attributes?.name ?? null,
+            },
+            productMeta: pData.data?.meta ?? null,
+            productRelationships: pData.data?.relationships ?? null,
+            variantCount: variants.length,
+            variants: variants.slice(0, 5).map(v => ({
+                id: String(v.id),
+                quantity: v.attributes?.quantity ?? null,
+                sku: v.attributes?.sku ?? null,
+                ean: v.attributes?.ean ?? null,
+                meta: v.meta ?? null,
+            })),
+        };
+
+        if (freshProduct.ean) productCache[freshProduct.ean] = freshProduct;
+        if (freshProduct.variantId) productCache['vid:' + freshProduct.variantId] = freshProduct;
+        addDebugLog(`Standalone lager ${product.productId}: product.quantity=${JSON.stringify(pData.data?.attributes?.quantity ?? null)}, physical=${JSON.stringify(pData.data?.attributes?.quantity_physical ?? null)}, reserved=${JSON.stringify(pData.data?.attributes?.quantity_reserved ?? null)}, variants=${variants.length}, variant=${shadowVariant ? `${shadowVariant.id}:${JSON.stringify(shadowVariant.attributes?.quantity ?? null)}` : 'ingen'}, valgt=${freshProduct.quantity}${shadowVariant ? ' via skjult variant' : ` via produkt.${resolvedProductInventory.source}`}`);
+        addDebugLog(`Standalone rådata ${product.productId}: ${JSON.stringify(rawStandaloneSnapshot)}`);
+        buildProductSearchIndex();
+        return freshProduct;
+    } catch (err) {
+        addDebugLog('Kunne ikke hente fersk lagerstatus for produkt: ' + err.message);
+        return product;
+    }
+}
+
+async function showVariantPicker(productId) {
+    const bucket = productEntriesByProductId[productId];
+    if (!bucket) {
+        showToast('Fant ikke produktet i lokal cache', 'error');
+        return;
+    }
+
+    if (bucket.variants.length === 0 && bucket.standalone) {
+        updateScannerStatus('Henter lagerstatus...');
+        const freshProduct = await getFreshStandaloneProductEntry(bucket.standalone);
+        showProductCard(freshProduct, freshProduct.ean || '');
+        return;
+    }
+
+    collapseScannerArea();
+    const options = bucket.variants.length > 0 ? bucket.variants : (bucket.standalone ? [bucket.standalone] : []);
+    const variantCountLabel = bucket.variants.length > 0
+        ? `${bucket.variants.length} variant${bucket.variants.length === 1 ? '' : 'er'}`
+        : 'Produkt uten varianter';
+    const bucketMeta = renderMetaLine([
+        renderSupplierFilterLink(bucket.supplierName),
+        bucket.productGroupName ? escHtml(bucket.productGroupName) : ''
+    ], 'search-result-meta');
+    const variantHtml = options.length
+        ? options.map(entry => {
+            const label = entry.variantName || 'Produkt uten varianter';
+            const meta = [entry.ean ? `EAN: ${escHtml(entry.ean)}` : '', entry.sku ? `SKU: ${escHtml(entry.sku)}` : '']
+                .filter(Boolean)
+                .join(' · ');
+            return `
+                <button class="variant-result-item" type="button" onclick="selectProductVariant('${productId}', '${entry.variantId || ''}')">
+                    <span class="search-result-main">
+                        <span class="search-result-title">${escHtml(label)}</span>
+                        <span class="search-result-subtitle">${meta || 'Ingen EAN registrert'}</span>
+                    </span>
+                    <span class="variant-stock-pill">Lager: ${entry.quantity}</span>
+                </button>`;
+        }).join('')
+        : '<div class="search-empty-state">Ingen varianter ble funnet for dette produktet.</div>';
+
+    document.getElementById('currentProduct').innerHTML = `
+        <div class="product-card search-panel" style="position:relative;">
+            <button onclick="clearCurrentProduct()" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
+            <div class="search-panel-header">
+                <div>
+                    <div class="search-panel-title">${escHtml(bucket.name)}</div>
+                    <div class="search-panel-subtitle">${escHtml(variantCountLabel)}</div>
+                    ${bucketMeta ? bucketMeta.replace('search-result-meta"', 'search-result-meta" style="margin-top:6px;"') : ''}
+                </div>
+                <button class="search-back-btn" type="button" onclick="renderProductSearchResults(activeProductSearchQuery, findProductsByName(activeProductSearchQuery))">Tilbake</button>
+            </div>
+            <div class="search-result-list">${variantHtml}</div>
+        </div>`;
+
+    updateScannerStatus(options.length ? 'Velg variant' : 'Ingen varianter');
+}
+
+function selectProductVariant(productId, variantId) {
+    const bucket = productEntriesByProductId[productId];
+    if (!bucket) {
+        showToast('Fant ikke produktet i lokal cache', 'error');
+        return;
+    }
+
+    const product = variantId
+        ? bucket.variants.find(entry => String(entry.variantId) === String(variantId))
+        : bucket.standalone;
+
+    if (!product) {
+        showToast('Fant ikke valgt variant', 'error');
+        return;
+    }
+
+    showProductCard(product, product.ean || '');
+}
+
 async function setProgress(pct, label) {
     const bar  = document.getElementById('loadProgressBar');
     const lbl  = document.getElementById('loadProgressLabel');
     const wrap = document.getElementById('loadProgress');
     console.log('setProgress', pct, label, 'bar:', bar, 'wrap:', wrap);
     if (!bar) { console.error('loadProgressBar not found!'); return; }
-    if (pct === null) { wrap.style.display = 'none'; bar.style.width = '0%'; return; }
+    if (pct === null) { wrap.style.display = 'none'; bar.style.width = '0%'; updateProgressDebugPanels(); return; }
     wrap.style.display = 'block';
     bar.style.width = pct + '%';
     if (label) lbl.textContent = label;
+    updateProgressDebugPanels();
     await new Promise(r => setTimeout(r, 60));
 }
 
@@ -299,12 +913,14 @@ async function setRefreshOverlayProgress(pct, label, text = null) {
         if (hint) {
             hint.innerHTML = 'Skanning og søk er midlertidig låst. Registrerte varer og varepåfyll ligger fortsatt og venter, og forsvinner ikke selv om produktlisten hentes på nytt.<span style="display:block; margin-top:6px;">Appen kan brukes igjen så snart oppdateringen er ferdig.</span>';
         }
+        updateProgressDebugPanels();
         return;
     }
     wrap.style.display = 'flex';
     bar.style.width = pct + '%';
     if (label) lbl.textContent = label;
     if (text) body.textContent = text;
+    updateProgressDebugPanels();
     await new Promise(r => setTimeout(r, 60));
 }
 
@@ -545,6 +1161,8 @@ function logoutAndReset() {
             clearSession();
             config = { shopName: '', apiKey: '' };
             productCache = {};
+            productSearchIndex = [];
+            productEntriesByProductId = {};
             countedItems = [];
             restockItems = [];
             if (isScanning && html5QrCode) {
@@ -661,6 +1279,7 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false, options
                 const { ts, data, v } = JSON.parse(saved);
                 if (v === PRODUCT_CACHE_VERSION && Date.now() - ts < PRODUCT_CACHE_MAX_AGE) {
                     productCache = data;
+                    buildProductSearchIndex();
                     const count = Object.keys(data).length;
                     await prog(100, 'Ferdig!');
                     console.log(`Produktcache lastet fra localStorage (${Math.round((Date.now()-ts)/60000)} min siden, ${count} oppføringer)`);
@@ -676,20 +1295,48 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false, options
 
     // Last produkter
     await prog(25, 'Laster produkter...');
-    const products = await fetchAllPages('/products?page[size]=250&fields[products]=name,sku,ean');
+    const productPages = await fetchAllPagesRaw('/products?page[size]=250&fields[products]=name,sku,ean,quantity&include=supplier,suppliers,manufacturer');
+    const products = productPages.flatMap(page => page.data || []);
+    const includedLookup = buildIncludedLookup(productPages);
+    const [supplierResources, manufacturerResources, categoryResources, accountingGroupResources, stockGroupResources] = await Promise.all([
+        fetchAllPages('/suppliers?page[size]=250').catch(() => []),
+        fetchAllPages('/manufacturers?page[size]=250').catch(() => []),
+        fetchAllPages('/categories?page[size]=250').catch(() => []),
+        fetchAllPages('/accounting-groups?page[size]=250').catch(() => []),
+        fetchAllPages('/stock-groups?page[size]=250').catch(() => [])
+    ]);
+    if (!categoryResources.length) addDebugLog('Kategorier kunne ikke lastes eller er ikke tilgjengelige for tokenet');
+    if (!accountingGroupResources.length) addDebugLog('Accounting groups kunne ikke lastes eller er ikke tilgjengelige for tokenet');
+    if (!stockGroupResources.length) addDebugLog('Stock groups kunne ikke lastes eller er ikke tilgjengelige for tokenet');
+    relationLookups = {
+        suppliers: buildNameLookup(supplierResources),
+        manufacturers: buildNameLookup(manufacturerResources),
+        categories: buildNameLookup(categoryResources),
+        accountingGroups: buildNameLookup(accountingGroupResources),
+        stockGroups: buildNameLookup(stockGroupResources)
+    };
 
     addDebugLog(`Lastet: ${products.length} produkter`);
 
     // Bygg produktnavn-kart
     const productNames = {};
+    const productSuppliers = {};
     const allProductEANs = [];
     for (const p of products) {
         const name = decodeHtmlEntities(p.attributes.name?.no || p.attributes.name?.en || '');
+        const supplierName = extractSupplierNameFromRelations(p, relationLookups)
+            || extractRelatedSupplierName(p, includedLookup)
+            || extractSupplierName(p.attributes || {});
+        const productGroupName = extractProductGroupNameFromRelations(p, relationLookups, includedLookup);
         productNames[p.id] = name;
+        productSuppliers[p.id] = supplierName;
+        if (productGroupName) productGroupsByProductId[p.id] = productGroupName;
         if (p.attributes.ean) {
             productCache[p.attributes.ean] = {
                 productId: p.id, variantId: null, name, variantName: '',
-                ean: p.attributes.ean, sku: '', quantity: 0
+                supplierName,
+                productGroupName,
+                ean: p.attributes.ean, sku: p.attributes.sku || '', quantity: parseInventoryQuantity(p.attributes.quantity)
             };
             allProductEANs.push(p.attributes.ean);
         }
@@ -742,6 +1389,8 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false, options
         const attr = v.attributes;
         const productId = v.relationships?.product?.data?.id;
         const name = decodeHtmlEntities(productNames[productId] || 'Ukjent produkt');
+        const supplierName = productSuppliers[productId] || '';
+        const productGroupName = productGroupsByProductId[productId] || '';
 
         const paIds = (v.relationships?.['product-attributes']?.data || []).map(d => d.id);
         const vNameParts = paIds
@@ -760,8 +1409,10 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false, options
 
         const entry = {
             productId, variantId: v.id, name, variantName: vName,
+            supplierName,
+            productGroupName,
             ean: attr.ean || '', sku: attr.sku || '',
-            quantity: parseInt(attr.quantity) || 0
+            quantity: parseInventoryQuantity(attr.quantity)
         };
         if (attr.ean) productCache[attr.ean] = entry;
         productCache['vid:' + v.id] = entry;
@@ -773,6 +1424,8 @@ async function cacheAllVariants(onProgress = null, forceRefresh = false, options
         localStorage.setItem(PRODUCT_CACHE_KEY, JSON.stringify({ v: PRODUCT_CACHE_VERSION, ts: Date.now(), data: productCache }));
         addDebugLog('Produktcache lagret til localStorage');
     } catch(e) { addDebugLog('Cache-lagring feil: ' + e.message); }
+
+    buildProductSearchIndex();
 
     await prog(100, 'Ferdig!');
     showToast(`${products.length} produkter, ${variantCount} varianter lastet`, 'success');
@@ -907,10 +1560,19 @@ function manualLookup() {
         showToast('Vent til produktlisten er ferdig oppdatert', 'error');
         return;
     }
-    const ean = document.getElementById('manualEan').value.trim();
-    if (!ean) return;
+    const query = document.getElementById('manualEan').value.trim();
+    if (!query) return;
     document.getElementById('manualEan').value = '';
-    lookupProduct(ean);
+
+    const looksLikeBarcode = /^[0-9]{8,}$/.test(query);
+    const existsInCache = Boolean(productCache[query]);
+
+    if (existsInCache || looksLikeBarcode) {
+        lookupProduct(query);
+        return;
+    }
+
+    searchProductsByName(query);
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -936,6 +1598,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('manualEan')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') manualLookup();
     });
+    document.getElementById('manualEan')?.addEventListener('input', handleManualInputChange);
 
     // Sjekk om det finnes en aktiv sesjon – hopp over PIN hvis fersk nok
     const session = loadSession();
@@ -1014,8 +1677,9 @@ async function lookupProduct(code) {
     // Check cache: direct EAN
     const product = productCache[code];
     if (product) {
-        addDebugLog('Funnet i cache: ' + JSON.stringify(product));
-        showProductCard(product, code);
+        const displayProduct = await getFreshStandaloneProductEntry(product);
+        addDebugLog('Funnet i cache: ' + JSON.stringify(displayProduct));
+        showProductCard(displayProduct, code);
     } else {
         addDebugLog('Ikke i cache, søker API for varianter...');
         // Fallback: search API by EAN filter on variants
@@ -1026,8 +1690,13 @@ async function lookupProduct(code) {
                 const productId = v.relationships?.product?.data?.id;
 
                 // Hent produktnavn
-                const pData = await apiFetch(`/products/${productId}?fields[products]=name`);
+                const pData = await apiFetch(`/products/${productId}?fields[products]=name,sku,ean,quantity&include=supplier,suppliers,manufacturer`);
                 const name = decodeHtmlEntities(pData.data?.attributes?.name?.no || pData.data?.attributes?.name?.en || 'Ukjent');
+                const productIncludedLookup = buildIncludedLookup([pData]);
+                const supplierName = extractSupplierNameFromRelations(pData.data, relationLookups)
+                    || extractRelatedSupplierName(pData.data, productIncludedLookup)
+                    || extractSupplierName(pData.data?.attributes || {});
+                const productGroupName = extractProductGroupNameFromRelations(pData.data, relationLookups, productIncludedLookup);
 
                 // Hent variantnavn fra inkluderte product-attributes → option-values
                 let variantName = '';
@@ -1050,12 +1719,15 @@ async function lookupProduct(code) {
 
                 const entry = {
                     productId, variantId: v.id, name, variantName,
+                    supplierName,
+                    productGroupName,
                     ean: v.attributes.ean || '',
                     sku: v.attributes.sku || '',
-                    quantity: parseInt(v.attributes.quantity) || 0
+                    quantity: parseInventoryQuantity(v.attributes.quantity)
                 };
                 if (entry.ean) productCache[entry.ean] = entry;
                 productCache['vid:' + v.id] = entry;
+                buildProductSearchIndex();
                 addDebugLog('Funnet i varianter: ' + JSON.stringify(entry));
                 showProductCard(entry, code);
             } else {
@@ -1085,9 +1757,15 @@ async function lookupProduct(code) {
                     if (found) {
                         const productId = found.relationships?.product?.data?.id;
                         let name = 'Ukjent';
+                        let supplierName = '';
                         try {
-                            const pData = await apiFetch(`/products/${productId}?fields[products]=name`);
+                            const pData = await apiFetch(`/products/${productId}?fields[products]=name,sku,ean,quantity&include=supplier,suppliers,manufacturer`);
                             name = pData.data?.attributes?.name?.no || pData.data?.attributes?.name?.en || 'Ukjent';
+                            const productIncludedLookup = buildIncludedLookup([pData]);
+                            supplierName = extractSupplierNameFromRelations(pData.data, relationLookups)
+                                || extractRelatedSupplierName(pData.data, productIncludedLookup)
+                                || extractSupplierName(pData.data?.attributes || {});
+                            var productGroupName = extractProductGroupNameFromRelations(pData.data, relationLookups, productIncludedLookup);
                         } catch (err) {
                             addDebugLog('Kunne ikke hente produktnavn: ' + err.message);
                         }
@@ -1095,12 +1773,15 @@ async function lookupProduct(code) {
                             productId: productId,
                             variantId: found.id,
                             name: name,
+                            supplierName,
+                            productGroupName: productGroupName || '',
                             variantName: '',
                             ean: found.attributes.ean || '',
                             sku: found.attributes.sku || '',
-                            quantity: parseInt(found.attributes.quantity) || 0
+                            quantity: parseInventoryQuantity(found.attributes.quantity)
                         };
                         if (entry.ean) productCache[entry.ean] = entry;
+                        buildProductSearchIndex();
                         addDebugLog('Funnet i alle varianter: ' + JSON.stringify(entry));
                         showProductCard(entry, code);
                     } else {
@@ -1148,10 +1829,28 @@ function restoreScannerArea() {
 function showProductCard(product, scannedCode) {
     updateScannerStatus('Funnet!');
     collapseScannerArea();
+    const manualInput = document.getElementById('manualEan');
+    if (manualInput) manualInput.value = '';
     if (!product.variantName && product.variantId) {
         addDebugLog(`Mangler variantnavn: variantId=${product.variantId}, ean=${product.ean}, produktnavn=${product.name}`);
     }
     const itemId = product.variantId || product.productId;
+    const isStandaloneProduct = !product.variantId;
+    const hasKnownInventory = product.inventorySource !== 'none';
+    const stockText = hasKnownInventory ? String(product.quantity) : 'Ikke tilgjengelig fra API';
+    const combinedMeta = renderMetaLine([
+        product.ean ? `EAN: ${escHtml(product.ean)}` : '',
+        renderSupplierFilterLink(product.supplierName),
+        product.productGroupName ? escHtml(product.productGroupName) : ''
+    ], 'product-meta');
+    const productNameHtml = product.productId
+        ? `<button type="button" class="product-name product-name-link" onclick="showVariantPicker('${product.productId}')">${escHtml(product.name)}</button>`
+        : `<div class="product-name">${escHtml(product.name)}</div>`;
+    const inventoryNotice = isStandaloneProduct
+        ? `<div class="already-counted-banner" style="background:#fff3cd; color:#7a5d00; border:1px solid #f3d98b;">Lageroppdatering er deaktivert for produkter uten varianter.</div>`
+        : (!hasKnownInventory
+            ? `<div class="already-counted-banner" style="background:#fff3cd; color:#7a5d00; border:1px solid #f3d98b;">Lagerstatus er ikke eksponert av Mystore API for dette produktet.</div>`
+            : '');
 
     let html;
     if (appMode === 'restock') {
@@ -1159,18 +1858,9 @@ function showProductCard(product, scannedCode) {
         const existingR = restockItems.find(i => (i.variantId || i.productId) === itemId);
         const prevAdd   = existingR ? existingR.addQty : 0;
         const minAdd    = -Math.max(0, product.quantity);
-        html = `
-        <div class="product-card" style="position:relative;">
-            <button onclick="document.getElementById('currentProduct').innerHTML=''; restoreScannerArea();" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
-            ${existingR ? `<div class="already-counted-banner">⚠️ Allerede justert med ${existingR.addQty > 0 ? '+' : ''}${existingR.addQty} stk tidligere</div>` : ''}
-            <div class="product-name">${escHtml(product.name)}</div>
-            ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
-            <div class="product-meta">${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}</div>
-            <div class="stock-row">
-                <span class="stock-label">Nåværende lager:</span>
-                <span class="stock-value">${product.quantity}</span>
-            </div>
-            <div class="qty-input-row">
+        const restockControls = isStandaloneProduct
+            ? `<div class="product-meta" style="margin-top:14px;">Produkter uten varianter kan ikke lageroppdateres fra appen.</div>`
+            : `
                 <div class="qty-stepper-multi restock-btns">
                     <button class="qty-btn minus-multi" onclick="stepRestockQty(-20)">−20</button>
                     <button class="qty-btn minus-multi" onclick="stepRestockQty(-10)">−10</button>
@@ -1179,36 +1869,42 @@ function showProductCard(product, scannedCode) {
                 </div>
                 <div class="restock-calc">
                     Legger til: <strong id="restockAdd">0</strong> &nbsp;→&nbsp;
-                    Ny total: <span class="restock-sum" id="restockTotal">${product.quantity}</span>
+                    Ny total: <span class="restock-sum" id="restockTotal">${hasKnownInventory ? product.quantity : 'Ukjent'}</span>
                 </div>
                 <div class="qty-stepper">
                     <button class="qty-btn minus" onclick="stepRestockQty(-1)">−</button>
-                    <input type="number" id="qtyInput" value="${prevAdd !== 0 ? prevAdd : ''}" min="${minAdd}" placeholder="0" inputmode="numeric"
+                    <input type="number" id="qtyInput" value="${prevAdd !== 0 ? prevAdd : ''}" min="${minAdd}" placeholder="0" inputmode="numeric" ${hasKnownInventory ? '' : 'disabled'}
                         oninput="updateRestockCalc(${product.quantity})">
                     <button class="qty-btn plus" onclick="stepRestockQty(1)">+</button>
                 </div>
-                    <button class="btn btn-primary btn-sm" style="background:var(--restock);"
+                <button class="btn btn-primary btn-sm" style="background:var(--restock);"
+                    ${hasKnownInventory ? '' : 'disabled'}
                     onclick="registerRestock('${product.variantId || ''}', '${product.productId}', '${encodeURIComponent(product.name)}', '${encodeURIComponent(scannedCode)}', ${product.quantity}, '${encodeURIComponent(product.variantName || '')}')">
                     ${existingR ? 'Oppdater påfyll' : 'Legg til beholdning'}
-                </button>
+                </button>`;
+        html = `
+        <div class="product-card" style="position:relative;">
+            <button onclick="clearCurrentProduct()" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
+            ${existingR ? `<div class="already-counted-banner">⚠️ Allerede justert med ${existingR.addQty > 0 ? '+' : ''}${existingR.addQty} stk tidligere</div>` : ''}
+            ${inventoryNotice}
+            ${productNameHtml}
+            ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
+            ${combinedMeta}
+            <div class="stock-row">
+                <span class="stock-label">Nåværende lager:</span>
+                <span class="stock-value">${stockText}</span>
+            </div>
+            <div class="qty-input-row">
+                ${restockControls}
             </div>
         </div>`;
     } else {
         // ── VARETELLING-KORT ──
         const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
         const currentQty = existing ? existing.newQty : product.quantity;
-        html = `
-        <div class="product-card" style="position:relative;">
-            <button onclick="document.getElementById('currentProduct').innerHTML=''; restoreScannerArea();" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
-            ${existing ? `<div class="already-counted-banner">⚠️ Allerede telt – tidligere antall: <strong>${existing.newQty}</strong></div>` : ''}
-            <div class="product-name">${escHtml(product.name)}</div>
-            ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
-            <div class="product-meta">${product.ean ? 'EAN: ' + escHtml(product.ean) : ''}</div>
-            <div class="stock-row">
-                <span class="stock-label">Nåværende lager:</span>
-                <span class="stock-value">${product.quantity}</span>
-            </div>
-            <div class="qty-input-row">
+        const countControls = isStandaloneProduct
+            ? `<div class="product-meta" style="margin-top:14px;">Produkter uten varianter kan ikke lageroppdateres fra appen.</div>`
+            : `
                 <div class="qty-stepper-multi">
                     <button class="qty-btn minus-multi" onclick="stepQty(-20)">−20</button>
                     <button class="qty-btn minus-multi" onclick="stepQty(-10)">−10</button>
@@ -1222,7 +1918,21 @@ function showProductCard(product, scannedCode) {
                 </div>
                 <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${encodeURIComponent(product.name)}', '${encodeURIComponent(scannedCode)}', ${product.quantity}, '${encodeURIComponent(product.variantName || '')}')">
                     ${existing ? 'Oppdater' : 'Registrer'}
-                </button>
+                </button>`;
+        html = `
+        <div class="product-card" style="position:relative;">
+            <button onclick="clearCurrentProduct()" style="position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text-muted); font-size:20px; line-height:1; cursor:pointer; padding:4px;">✕</button>
+            ${existing ? `<div class="already-counted-banner">⚠️ Allerede telt – tidligere antall: <strong>${existing.newQty}</strong></div>` : ''}
+            ${inventoryNotice}
+            ${productNameHtml}
+            ${product.variantName ? `<div class="product-variant-name">${escHtml(product.variantName)}</div>` : ''}
+            ${combinedMeta}
+            <div class="stock-row">
+                <span class="stock-label">Nåværende lager:</span>
+                <span class="stock-value">${stockText}</span>
+            </div>
+            <div class="qty-input-row">
+                ${countControls}
             </div>
         </div>`;
     }
@@ -1273,6 +1983,10 @@ function registerRestock(variantId, productId, name, ean, oldQty, variantName) {
     name = decodeURIComponent(name);
     ean  = decodeURIComponent(ean);
     variantName = decodeURIComponent(variantName || '');
+    if (!variantId) {
+        showToast('Produkter uten varianter kan ikke lageroppdateres fra appen', 'error');
+        return;
+    }
     const inp    = document.getElementById('qtyInput');
     const addQty = parseInt(inp?.value);
     if (isNaN(addQty) || addQty === 0) {
@@ -1286,12 +2000,15 @@ function registerRestock(variantId, productId, name, ean, oldQty, variantName) {
 
     const itemId   = variantId || productId;
     const existing = restockItems.find(i => (i.variantId || i.productId) === itemId);
+    const metadata = getProductMetadata({ variantId, ean, productId });
     if (existing) {
         existing.addQty = addQty;
         existing.status = 'pending';
         if (variantName) existing.variantName = variantName;
+        if (metadata.supplierName) existing.supplierName = metadata.supplierName;
+        if (metadata.productGroupName) existing.productGroupName = metadata.productGroupName;
     } else {
-        restockItems.push({ variantId, productId, name, variantName: variantName || '', ean, oldQty, addQty, status: 'pending' });
+        restockItems.push({ variantId, productId, name, variantName: variantName || '', ean, oldQty, addQty, status: 'pending', supplierName: metadata.supplierName, productGroupName: metadata.productGroupName });
     }
 
     document.getElementById('currentProduct').innerHTML = '';
@@ -1307,6 +2024,7 @@ function updateRestockList() {
     const el = document.getElementById('restockSection');
     if (!el) return;
     if (restockItems.length === 0) { el.innerHTML = ''; return; }
+    let shouldSave = false;
 
     let html = `
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
@@ -1316,17 +2034,23 @@ function updateRestockList() {
 
     for (let i = restockItems.length - 1; i >= 0; i--) {
         const item = restockItems[i];
+        if (hydrateQueuedItemMetadata(item)) shouldSave = true;
         const newQty = item.oldQty + item.addQty;
         const addQtyLabel = `${item.addQty > 0 ? '+' : ''}${item.addQty}`;
         const addQtyColor = item.addQty >= 0 ? 'var(--restock)' : 'var(--danger)';
         const statusClass = item.status === 'saved' ? 'status-saved' : item.status === 'error' ? 'status-error' : 'status-pending';
         const statusText  = item.status === 'saved' ? 'Lagret' : item.status === 'error' ? 'Feil' : 'Venter';
+        const metaHtml = renderMetaLine([
+            renderSupplierFilterLink(item.supplierName),
+            item.productGroupName ? escHtml(item.productGroupName) : ''
+        ], 'item-meta');
         html += `
             <div class="counted-item">
                 <div class="item-top">
                     <div class="item-info">
                         <div class="item-name">${escHtml(item.name || '')}</div>
                         ${item.variantName ? `<div class="item-variant">${escHtml(item.variantName)}</div>` : ''}
+                        ${metaHtml}
                         <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}</div>
                     </div>
                     <span class="item-qty" style="color:${addQtyColor};">${addQtyLabel}</span>
@@ -1340,6 +2064,7 @@ function updateRestockList() {
             </div>`;
     }
     el.innerHTML = html;
+    if (shouldSave) saveRestockItems();
 }
 
 function deleteAllRestock() {
@@ -1376,6 +2101,8 @@ function editRestockItem(variantId, productId) {
         variantId: item.variantId,
         productId: item.productId,
         quantity: item.oldQty !== undefined ? item.oldQty : 0,
+        supplierName: item.supplierName || '',
+        productGroupName: item.productGroupName || '',
     };
 
     if (appMode !== 'restock') {
@@ -1397,6 +2124,10 @@ function registerCount(variantId, productId, name, ean, oldQty, variantName) {
     name = decodeURIComponent(name);
     ean = decodeURIComponent(ean);
     variantName = decodeURIComponent(variantName || '');
+    if (!variantId) {
+        showToast('Produkter uten varianter kan ikke lageroppdateres fra appen', 'error');
+        return;
+    }
     const inp = document.getElementById('qtyInput');
     const newQty = parseInt(inp?.value);
     if (isNaN(newQty) || newQty < 0) {
@@ -1406,12 +2137,15 @@ function registerCount(variantId, productId, name, ean, oldQty, variantName) {
 
     const itemId = variantId || productId;
     const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
+    const metadata = getProductMetadata({ variantId, ean, productId });
     if (existing) {
         existing.newQty = newQty;
         existing.status = 'pending';
         if (variantName) existing.variantName = variantName;
+        if (metadata.supplierName) existing.supplierName = metadata.supplierName;
+        if (metadata.productGroupName) existing.productGroupName = metadata.productGroupName;
     } else {
-        countedItems.push({ variantId, productId, name, variantName: variantName || '', ean, sku: '', oldQty, newQty, status: 'pending' });
+        countedItems.push({ variantId, productId, name, variantName: variantName || '', ean, sku: '', oldQty, newQty, status: 'pending', supplierName: metadata.supplierName, productGroupName: metadata.productGroupName });
     }
 
     document.getElementById('currentProduct').innerHTML = '';
@@ -1430,6 +2164,7 @@ function updateCountedList() {
         document.getElementById('countedSection').innerHTML = '';
         return;
     }
+    let shouldSave = false;
 
     let html = `
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
@@ -1439,6 +2174,7 @@ function updateCountedList() {
     `;
     for (let i = countedItems.length - 1; i >= 0; i--) {
         const item = countedItems[i];
+        if (hydrateQueuedItemMetadata(item)) shouldSave = true;
         const diff = item.newQty - item.oldQty;
         const diffStr = diff > 0 ? `+${diff}` : String(diff);
         const statusClass = item.status === 'saved' ? 'status-saved' : item.status === 'error' ? 'status-error' : 'status-pending';
@@ -1446,6 +2182,10 @@ function updateCountedList() {
 
         const productName = item.name || '';
         const variantName = item.variantName || '';
+        const metaHtml = renderMetaLine([
+            renderSupplierFilterLink(item.supplierName),
+            item.productGroupName ? escHtml(item.productGroupName) : ''
+        ], 'item-meta');
 
         html += `
             <div class="counted-item">
@@ -1453,6 +2193,7 @@ function updateCountedList() {
                     <div class="item-info">
                         <div class="item-name">${escHtml(productName)}</div>
                         ${variantName ? `<div class="item-variant">${escHtml(variantName)}</div>` : ''}
+                        ${metaHtml}
                         <div class="item-ean">${item.ean ? 'EAN: ' + escHtml(item.ean) : ''}</div>
                     </div>
                     <span class="item-qty">${item.newQty}</span>
@@ -1467,6 +2208,7 @@ function updateCountedList() {
         `;
     }
     document.getElementById('countedSection').innerHTML = html;
+    if (shouldSave) saveCountedItems();
 }
 
 async function refreshProductCache() {
@@ -1488,6 +2230,8 @@ async function refreshProductCache() {
     try {
         showToast('Oppdaterer produktliste fra nettbutikken...', 'success');
         productCache = {};
+        productSearchIndex = [];
+        productEntriesByProductId = {};
         localStorage.removeItem(PRODUCT_CACHE_KEY);
         await setRefreshOverlayProgress(5, 'Forbereder nedlasting...', 'Produktlisten lastes inn på nytt fra nettbutikken.');
         await cacheAllVariants(setRefreshOverlayProgress, true, { useScannerStatus: false });
@@ -1595,6 +2339,8 @@ function editCountedItem(variantId, productId) {
         variantId: item.variantId,
         productId: item.productId,
         quantity: item.oldQty !== undefined ? item.oldQty : '',
+        supplierName: item.supplierName || '',
+        productGroupName: item.productGroupName || '',
     };
     showProductCard(product, item.ean || '');
     // Sett inputfeltet til forrige telt antall
@@ -1638,10 +2384,9 @@ async function saveAllRestockToMyStore() {
         await new Promise(r => setTimeout(r, 60));
         try {
             if (!item.variantId) {
-                await updateProductStock(item.productId, newQty);
-            } else {
-                await updateVariantStock(item.variantId, newQty);
+                throw new Error('Produkter uten varianter kan ikke lageroppdateres fra appen');
             }
+            await updateVariantStock(item.variantId, newQty);
             item.status = 'saved';
             item.oldQty = newQty; // oppdater slik at dobbel-lagring ikke dobler igjen
             savedCount++;
@@ -1687,15 +2432,12 @@ async function saveAllToMyStore() {
         lbl.textContent = `Lagrer ${done + 1} av ${pending.length}: ${name}`;
         bar.style.width = Math.round((done / pending.length) * 100) + '%';
         await new Promise(r => setTimeout(r, 60));
-
         try {
             if (!item.variantId) {
-                await updateProductStock(item.productId, item.newQty);
-                item.status = 'saved';
-            } else {
-                await updateVariantStock(item.variantId, item.newQty);
-                item.status = 'saved';
+                throw new Error('Produkter uten varianter kan ikke lageroppdateres fra appen');
             }
+            await updateVariantStock(item.variantId, item.newQty);
+            item.status = 'saved';
             const cacheKey = item.variantId ? 'vid:' + item.variantId : item.ean;
             if (cacheKey && productCache[cacheKey]) productCache[cacheKey].quantity = item.newQty;
             if (item.ean && productCache[item.ean]) productCache[item.ean].quantity = item.newQty;
@@ -1751,9 +2493,26 @@ function decodeHtmlEntities(str) {
     txt.innerHTML = str;
     return txt.value;
 }
+
+function updateProgressDebugPanels() {
+    const debugText = debugLog.length ? debugLog.slice(-6).join('\n') : '(ingen logger ennå)';
+    const panels = [
+        document.getElementById('loadProgressDebug'),
+        document.getElementById('refreshProgressDebug')
+    ];
+
+    for (const panel of panels) {
+        if (!panel) continue;
+        panel.textContent = debugText;
+        panel.style.display = debugLog.length ? 'block' : 'none';
+        panel.scrollTop = panel.scrollHeight;
+    }
+}
+
 function addDebugLog(message) {
     debugLog.push(new Date().toLocaleTimeString() + ': ' + message);
     if (debugLog.length > 10) debugLog.shift();  // Behold kun siste 10
+    updateProgressDebugPanels();
 }
 
 function showDebugLog() {
@@ -1792,7 +2551,7 @@ function showDebugLog() {
                     <button onclick="navigator.clipboard.writeText(document.getElementById('debugLogContent').textContent)"
                         style="background:#313244; color:#cdd6f4; border:none; border-radius:6px;
                                padding:8px 14px; cursor:pointer; font-size:13px;">Kopier</button>
-                    <button onclick="debugLog=[]; document.getElementById('debugLogContent').textContent='(tømt)';"
+                    <button onclick="debugLog=[]; document.getElementById('debugLogContent').textContent='(tømt)'; updateProgressDebugPanels();"
                         style="background:#313244; color:#f38ba8; border:none; border-radius:6px;
                                padding:8px 14px; cursor:pointer; font-size:13px;">Tøm</button>
                 </div>
@@ -1853,6 +2612,25 @@ function showToast(msg, type = '') {
 }
 
 async function hardReloadApp() {
+    const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+    const reloadUrl = new URL('./varetelling.html', window.location.href);
+    reloadUrl.searchParams.set(APP_UPDATED_QUERY_KEY, '1');
+    reloadUrl.searchParams.set('ts', String(Date.now()));
+
+    if (isLocalhost) {
+        try {
+            if ('serviceWorker' in navigator) {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map(r => r.update().catch(() => {})));
+            }
+        } catch (e) {
+            console.warn('Localhost update check feilet:', e);
+        } finally {
+            window.location.replace(reloadUrl.toString());
+        }
+        return;
+    }
+
     try {
         try {
             sessionStorage.setItem(APP_UPDATED_FLAG_KEY, String(Date.now()));
@@ -1871,9 +2649,6 @@ async function hardReloadApp() {
     } catch (e) {
         console.warn('Hard reload cleanup feilet:', e);
     } finally {
-        const reloadUrl = new URL('./varetelling.html', window.location.href);
-        reloadUrl.searchParams.set(APP_UPDATED_QUERY_KEY, '1');
-        reloadUrl.searchParams.set('ts', String(Date.now()));
         window.location.replace(reloadUrl.toString());
     }
 }
