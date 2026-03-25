@@ -12,7 +12,7 @@
     <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260325-2">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
 </head>
 <body>
@@ -141,7 +141,13 @@ const PRODUCT_CACHE_MAX_AGE = 4 * 60 * 60 * 1000; // 4 timer
 const APP_UPDATED_FLAG_KEY = 'ms_app_updated_notice';
 const APP_UPDATED_QUERY_KEY = 'appUpdated';
 const APP_LOADED_AT = Date.now();
-const UPDATE_CHECK_PATHS = ['./varetelling.html', './styles.css', './crypto.js', './sw.js'];
+const STATIC_ASSET_VERSION = '20260325-2';
+const UPDATE_CHECK_PATHS = [
+    './varetelling.html',
+    `./styles.css?v=${STATIC_ASSET_VERSION}`,
+    './crypto.js',
+    `./sw.js?v=${STATIC_ASSET_VERSION}`
+];
 
 // ─── STATE ───────────────────────────────────────────
 let config = { shopName: '', apiKey: '' };
@@ -165,6 +171,7 @@ let wakeLock = null;
 let wakeLockSupportLogged = false;
 let isRefreshingProductCache = false;
 let activeProductSearchQuery = '';
+let activeProductTypeFilter = 'all';
 let liveSearchTimer = null;
 let relationLookups = {
     suppliers: {},
@@ -568,6 +575,86 @@ function hydrateQueuedItemMetadata(item) {
     return changed;
 }
 
+function getProductTypeFilter(productGroupName = '') {
+    const normalizedGroupName = normalizeSearchText(productGroupName);
+    if (!normalizedGroupName) return 'other';
+    if (normalizedGroupName.includes('broderi') || normalizedGroupName.includes('broder')) return 'broderi';
+    if (
+        normalizedGroupName.includes('pinner')
+        || normalizedGroupName.includes('pinne')
+        || normalizedGroupName.includes('rundpinne')
+        || normalizedGroupName.includes('heklenal')
+        || normalizedGroupName.includes('heklenaler')
+    ) return 'pinner';
+    if (normalizedGroupName.includes('garn')) return 'garn';
+    return 'other';
+}
+
+function isSupplierSearch(query, results = []) {
+    const normalizedQuery = normalizeSearchText(query);
+    if (!normalizedQuery || !Array.isArray(results) || results.length === 0) return false;
+
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    return results.some(product =>
+        tokens.every(token => (product.normalizedSupplierName || '').includes(token))
+    );
+}
+
+function getFilteredProductSearchResults(results, filterKey = activeProductTypeFilter) {
+    if (!Array.isArray(results) || filterKey === 'all') return results;
+    return results.filter(product => getProductTypeFilter(product.productGroupName) === filterKey);
+}
+
+function getProductTypeFilterCounts(results) {
+    const counts = { all: Array.isArray(results) ? results.length : 0, garn: 0, pinner: 0, broderi: 0 };
+    if (!Array.isArray(results)) return counts;
+
+    for (const product of results) {
+        const filterKey = getProductTypeFilter(product.productGroupName);
+        if (counts[filterKey] !== undefined) counts[filterKey] += 1;
+    }
+
+    return counts;
+}
+
+function renderProductTypeFilterBar(results) {
+    const options = [
+        { key: 'all', label: 'Alle' },
+        { key: 'garn', label: 'Garn' },
+        { key: 'pinner', label: 'Pinner' },
+        { key: 'broderi', label: 'Broderi' }
+    ];
+    const counts = getProductTypeFilterCounts(results);
+    const hasCategoryResults = options.slice(1).some(option => counts[option.key] > 0);
+    if (!hasCategoryResults) return '';
+
+    return `
+        <div class="search-filter-panel">
+            <div class="search-filter-label">Filtrer varetype</div>
+            <div class="search-filter-row" aria-label="Filtrer leverandørtreff">
+            ${options.map(option => `
+                <button
+                    type="button"
+                    class="search-filter-chip${activeProductTypeFilter === option.key ? ' is-active' : ''}"
+                    onclick="setProductTypeFilter('${option.key}')"
+                >
+                    <span class="search-filter-chip-label">${option.label}</span>
+                    <span class="search-filter-chip-count">${counts[option.key] || 0}</span>
+                </button>`).join('')}
+            </div>
+        </div>`;
+}
+
+function setProductTypeFilter(filterKey = 'all') {
+    activeProductTypeFilter = filterKey;
+    rerenderActiveProductSearch();
+}
+
+function rerenderActiveProductSearch() {
+    if (!activeProductSearchQuery) return;
+    renderProductSearchResults(activeProductSearchQuery, findProductsByName(activeProductSearchQuery), { preserveFilter: true });
+}
+
 function findProductsByName(query) {
     const normalizedQuery = normalizeSearchText(query);
     if (!normalizedQuery) return [];
@@ -604,6 +691,7 @@ function findProductsByName(query) {
 
 function clearCurrentProduct() {
     activeProductSearchQuery = '';
+    activeProductTypeFilter = 'all';
     document.getElementById('currentProduct').innerHTML = '';
     restoreScannerArea();
 }
@@ -635,12 +723,23 @@ function hasOpenSearchPanel() {
     return Boolean(document.querySelector('#currentProduct .search-panel'));
 }
 
-function renderProductSearchResults(query, results) {
+function renderProductSearchResults(query, results, options = {}) {
+    const { preserveFilter = false } = options;
     activeProductSearchQuery = query;
+    if (!preserveFilter) activeProductTypeFilter = 'all';
     collapseScannerArea();
 
-    const resultHtml = results.length
-        ? results.map(product => {
+    const showSupplierFilters = isSupplierSearch(query, results);
+    const filteredResults = showSupplierFilters
+        ? getFilteredProductSearchResults(results)
+        : results;
+    const filterBarHtml = showSupplierFilters ? renderProductTypeFilterBar(results) : '';
+    const resultSubtitle = showSupplierFilters
+        ? `${filteredResults.length} av ${results.length} treff på «${escHtml(query)}»`
+        : `${results.length} treff på «${escHtml(query)}»`;
+
+    const resultHtml = filteredResults.length
+        ? filteredResults.map(product => {
             const variantLabel = product.variantCount > 0
                 ? `${product.variantCount} variant${product.variantCount === 1 ? '' : 'er'}`
                 : 'Produkt uten varianter';
@@ -658,7 +757,9 @@ function renderProductSearchResults(query, results) {
                     <span class="search-result-arrow">Velg</span>
                 </button>`;
         }).join('')
-        : `<div class="search-empty-state">Ingen produkter matchet «${escHtml(query)}». Prøv et kortere eller mer presist navn.</div>`;
+        : `<div class="search-empty-state">${showSupplierFilters && activeProductTypeFilter !== 'all'
+            ? 'Ingen produkter i denne varetypen for valgt leverandør.'
+            : `Ingen produkter matchet «${escHtml(query)}». Prøv et kortere eller mer presist navn.`}</div>`;
 
     document.getElementById('currentProduct').innerHTML = `
         <div class="product-card search-panel" style="position:relative;">
@@ -666,13 +767,14 @@ function renderProductSearchResults(query, results) {
             <div class="search-panel-header">
                 <div>
                     <div class="search-panel-title">Produktsøk</div>
-                    <div class="search-panel-subtitle">${results.length} treff på «${escHtml(query)}»</div>
+                    <div class="search-panel-subtitle">${resultSubtitle}</div>
                 </div>
             </div>
+            ${filterBarHtml}
             <div class="search-result-list">${resultHtml}</div>
         </div>`;
 
-    updateScannerStatus(results.length ? 'Velg produkt' : 'Ingen treff');
+    updateScannerStatus(filteredResults.length ? 'Velg produkt' : 'Ingen treff');
 }
 
 function searchProductsByName(query = '', options = {}) {
@@ -843,7 +945,7 @@ async function showVariantPicker(productId) {
                     <div class="search-panel-subtitle">${escHtml(variantCountLabel)}</div>
                     ${bucketMeta ? bucketMeta.replace('search-result-meta"', 'search-result-meta" style="margin-top:6px;"') : ''}
                 </div>
-                <button class="search-back-btn" type="button" onclick="renderProductSearchResults(activeProductSearchQuery, findProductsByName(activeProductSearchQuery))">Tilbake</button>
+                <button class="search-back-btn" type="button" onclick="rerenderActiveProductSearch()">Tilbake</button>
             </div>
             <div class="search-result-list">${variantHtml}</div>
         </div>`;
@@ -1651,7 +1753,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 60000);
 
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js').then(registration => {
+        navigator.serviceWorker.register(`./sw.js?v=${STATIC_ASSET_VERSION}`).then(registration => {
             if (registration.waiting) setUpdateAvailableState(true);
 
             registration.addEventListener('updatefound', () => {
@@ -1839,6 +1941,7 @@ function showProductCard(product, scannedCode) {
     const isStandaloneProduct = !product.variantId;
     const hasKnownInventory = product.inventorySource !== 'none';
     const stockText = hasKnownInventory ? String(product.quantity) : 'Ikke tilgjengelig fra API';
+    const submitOldQty = hasKnownInventory ? String(product.quantity) : 'null';
     const combinedMeta = renderMetaLine([
         product.ean ? `EAN: ${escHtml(product.ean)}` : '',
         renderSupplierFilterLink(product.supplierName),
@@ -1847,10 +1950,12 @@ function showProductCard(product, scannedCode) {
     const productNameHtml = product.productId
         ? `<button type="button" class="product-name product-name-link" onclick="showVariantPicker('${product.productId}')">${escHtml(product.name)}</button>`
         : `<div class="product-name">${escHtml(product.name)}</div>`;
-    const inventoryNotice = isStandaloneProduct
-        ? `<div class="already-counted-banner" style="background:#fff3cd; color:#7a5d00; border:1px solid #f3d98b;">Lageroppdatering er deaktivert for produkter uten varianter.</div>`
+    const inventoryNotice = appMode === 'restock'
+        ? (!hasKnownInventory
+            ? `<div class="already-counted-banner" style="background:#fff3cd; color:#7a5d00; border:1px solid #f3d98b;">Lagerstatus er ikke eksponert av Mystore API for dette produktet, så varepåfyll kan ikke beregnes akkurat nå.</div>`
+            : '')
         : (!hasKnownInventory
-            ? `<div class="already-counted-banner" style="background:#fff3cd; color:#7a5d00; border:1px solid #f3d98b;">Lagerstatus er ikke eksponert av Mystore API for dette produktet.</div>`
+            ? `<div class="already-counted-banner" style="background:#fff3cd; color:#7a5d00; border:1px solid #f3d98b;">Lagerstatus er ikke eksponert av Mystore API. Du kan likevel registrere nytt lagerantall direkte.</div>`
             : '');
 
     let html;
@@ -1859,9 +1964,7 @@ function showProductCard(product, scannedCode) {
         const existingR = restockItems.find(i => (i.variantId || i.productId) === itemId);
         const prevAdd   = existingR ? existingR.addQty : 0;
         const minAdd    = -Math.max(0, product.quantity);
-        const restockControls = isStandaloneProduct
-            ? `<div class="product-meta" style="margin-top:14px;">Produkter uten varianter kan ikke lageroppdateres fra appen.</div>`
-            : `
+        const restockControls = `
                 <div class="qty-stepper-multi restock-btns">
                     <button class="qty-btn minus-multi" onclick="stepRestockQty(-20)">−20</button>
                     <button class="qty-btn minus-multi" onclick="stepRestockQty(-10)">−10</button>
@@ -1903,9 +2006,7 @@ function showProductCard(product, scannedCode) {
         // ── VARETELLING-KORT ──
         const existing = countedItems.find(i => (i.variantId || i.productId) === itemId);
         const currentQty = existing ? existing.newQty : product.quantity;
-        const countControls = isStandaloneProduct
-            ? `<div class="product-meta" style="margin-top:14px;">Produkter uten varianter kan ikke lageroppdateres fra appen.</div>`
-            : `
+        const countControls = `
                 <div class="qty-stepper-multi">
                     <button class="qty-btn minus-multi" onclick="stepQty(-20)">−20</button>
                     <button class="qty-btn minus-multi" onclick="stepQty(-10)">−10</button>
@@ -1917,7 +2018,7 @@ function showProductCard(product, scannedCode) {
                     <input type="number" id="qtyInput" value="${existing ? currentQty : ''}" min="0" placeholder="0" inputmode="numeric">
                     <button class="qty-btn plus" onclick="stepQty(1)">+</button>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${encodeURIComponent(product.name)}', '${encodeURIComponent(scannedCode)}', ${product.quantity}, '${encodeURIComponent(product.variantName || '')}')">
+                <button class="btn btn-primary btn-sm" onclick="registerCount('${product.variantId || ''}', '${product.productId}', '${encodeURIComponent(product.name)}', '${encodeURIComponent(scannedCode)}', ${submitOldQty}, '${encodeURIComponent(product.variantName || '')}')">
                     ${existing ? 'Oppdater' : 'Registrer'}
                 </button>`;
         html = `
@@ -1984,10 +2085,6 @@ function registerRestock(variantId, productId, name, ean, oldQty, variantName) {
     name = decodeURIComponent(name);
     ean  = decodeURIComponent(ean);
     variantName = decodeURIComponent(variantName || '');
-    if (!variantId) {
-        showToast('Produkter uten varianter kan ikke lageroppdateres fra appen', 'error');
-        return;
-    }
     const inp    = document.getElementById('qtyInput');
     const addQty = parseInt(inp?.value);
     if (isNaN(addQty) || addQty === 0) {
@@ -2125,10 +2222,6 @@ function registerCount(variantId, productId, name, ean, oldQty, variantName) {
     name = decodeURIComponent(name);
     ean = decodeURIComponent(ean);
     variantName = decodeURIComponent(variantName || '');
-    if (!variantId) {
-        showToast('Produkter uten varianter kan ikke lageroppdateres fra appen', 'error');
-        return;
-    }
     const inp = document.getElementById('qtyInput');
     const newQty = parseInt(inp?.value);
     if (isNaN(newQty) || newQty < 0) {
@@ -2176,8 +2269,9 @@ function updateCountedList() {
     for (let i = countedItems.length - 1; i >= 0; i--) {
         const item = countedItems[i];
         if (hydrateQueuedItemMetadata(item)) shouldSave = true;
-        const diff = item.newQty - item.oldQty;
-        const diffStr = diff > 0 ? `+${diff}` : String(diff);
+        const hasKnownOldQty = Number.isFinite(item.oldQty);
+        const diff = hasKnownOldQty ? (item.newQty - item.oldQty) : null;
+        const diffStr = diff === null ? '' : (diff > 0 ? `+${diff}` : String(diff));
         const statusClass = item.status === 'saved' ? 'status-saved' : item.status === 'error' ? 'status-error' : 'status-pending';
         const statusText = item.status === 'saved' ? 'Lagret' : item.status === 'error' ? 'Feil' : 'Venter';
 
@@ -2200,7 +2294,9 @@ function updateCountedList() {
                     <span class="item-qty">${item.newQty}</span>
                 </div>
                 <div class="item-bottom">
-                    <span class="item-qty-change">${item.oldQty} → ${item.newQty} <span style="color:${diff >= 0 ? 'var(--success)' : 'var(--danger)'};font-weight:600;">(${diffStr})</span></span>
+                    <span class="item-qty-change">${hasKnownOldQty
+                        ? `${item.oldQty} → ${item.newQty} <span style="color:${diff >= 0 ? 'var(--success)' : 'var(--danger)'};font-weight:600;">(${diffStr})</span>`
+                        : `Ukjent → ${item.newQty}`}</span>
                     <span class="item-status ${statusClass}">${statusText}</span>
                     <button class="item-edit-btn" onclick="editCountedItem('${item.variantId || ''}', '${item.productId}')">Endre</button>
                     <button class="item-delete-btn" onclick="deleteCountedItem('${item.variantId || ''}', '${item.productId}')">Slett</button>
@@ -2385,15 +2481,20 @@ async function saveAllRestockToMyStore() {
         await new Promise(r => setTimeout(r, 60));
         try {
             if (!item.variantId) {
-                throw new Error('Produkter uten varianter kan ikke lageroppdateres fra appen');
+                await updateProductStock(item.productId, newQty);
+            } else {
+                await updateVariantStock(item.variantId, newQty);
             }
-            await updateVariantStock(item.variantId, newQty);
             item.status = 'saved';
             item.oldQty = newQty; // oppdater slik at dobbel-lagring ikke dobler igjen
             savedCount++;
             const cacheKey = item.variantId ? 'vid:' + item.variantId : item.ean;
             if (cacheKey && productCache[cacheKey]) productCache[cacheKey].quantity = newQty;
             if (item.ean && productCache[item.ean]) productCache[item.ean].quantity = newQty;
+            if (!item.variantId && productEntriesByProductId[item.productId]?.standalone) {
+                productEntriesByProductId[item.productId].standalone.quantity = newQty;
+                productEntriesByProductId[item.productId].standalone.inventorySource = 'manual-set';
+            }
         } catch(e) {
             item.status = 'error';
             showToast(`Feil ved lagring: ${e.message}`, 'error');
@@ -2435,13 +2536,19 @@ async function saveAllToMyStore() {
         await new Promise(r => setTimeout(r, 60));
         try {
             if (!item.variantId) {
-                throw new Error('Produkter uten varianter kan ikke lageroppdateres fra appen');
+                await updateProductStock(item.productId, item.newQty);
+            } else {
+                await updateVariantStock(item.variantId, item.newQty);
             }
-            await updateVariantStock(item.variantId, item.newQty);
             item.status = 'saved';
+            item.oldQty = item.newQty;
             const cacheKey = item.variantId ? 'vid:' + item.variantId : item.ean;
             if (cacheKey && productCache[cacheKey]) productCache[cacheKey].quantity = item.newQty;
             if (item.ean && productCache[item.ean]) productCache[item.ean].quantity = item.newQty;
+            if (!item.variantId && productEntriesByProductId[item.productId]?.standalone) {
+                productEntriesByProductId[item.productId].standalone.quantity = item.newQty;
+                productEntriesByProductId[item.productId].standalone.inventorySource = 'manual-set';
+            }
         } catch (e) {
             item.status = 'error';
             console.error('Lagring feilet for vare:', item, e);

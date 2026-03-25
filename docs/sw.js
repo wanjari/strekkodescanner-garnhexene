@@ -1,9 +1,15 @@
-const CACHE = 'varetelling-v25';
+const CACHE = 'varetelling-v26';
+const STATIC_ASSET_VERSION = '20260325-2';
 
 self.addEventListener('install', e => {
     e.waitUntil(
         caches.open(CACHE).then(cache =>
-            cache.addAll(['./varetelling.html', './styles.css', './crypto.js', './manifest.json'])
+            cache.addAll([
+                './varetelling.html',
+                `./styles.css?v=${STATIC_ASSET_VERSION}`,
+                './crypto.js',
+                './manifest.json'
+            ])
         ).catch(() => {})
     );
     self.skipWaiting();
